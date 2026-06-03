@@ -200,6 +200,19 @@ class nsZenWindowSync {
   }
 
   /**
+   * Returns whether a tab is currently displaying a real page rather than a
+   * blank placeholder, i.e. it holds live contents that could be handed off to
+   * a synced tab in another window.
+   *
+   * @param {MozTabbrowserTab} aTab - The tab to check.
+   * @returns {boolean} True if the tab is showing live contents.
+   */
+  #hasLiveContent(aTab) {
+    const spec = aTab?.linkedBrowser?.currentURI?.spec;
+    return !!(spec && spec !== "about:blank");
+  }
+
+  /**
    * Called when a browser window is about to be shown.
    * Adds event listeners for the specified events.
    *
@@ -1154,12 +1167,23 @@ class nsZenWindowSync {
         aWindow,
         selectedTab.id
       );
+      // gh-13027: decide the swap from what each tab actually holds, not just
+      // from the (sometimes stale) _zenContentsVisible flag. Only pull contents
+      // in when this tab is blank AND another window genuinely holds the live
+      // page; never swap a page out of a tab that already shows it, and clear a
+      // stale "owner" flag that points at a blank tab.
+      const selHasContent = this.#hasLiveContent(selectedTab);
+      const otherHasContent = this.#hasLiveContent(otherSelectedTab);
       selectedTab._zenContentsVisible = true;
-      if (otherSelectedTab) {
+      if (otherSelectedTab && !selHasContent && otherHasContent) {
         delete otherSelectedTab._zenContentsVisible;
         promises.push(
           this.#swapBrowserDocShellsAsync(selectedTab, otherSelectedTab)
         );
+      } else if (otherSelectedTab && !otherHasContent && !selHasContent) {
+        // The flagged owner is blank too (stale bookkeeping): nothing to pull,
+        // so clear the stale flag and let this tab restore its own contents.
+        delete otherSelectedTab._zenContentsVisible;
       }
     }
     await Promise.all(promises);
@@ -1500,10 +1524,17 @@ class nsZenWindowSync {
     window.addEventListener("TabSelect", onTabSelect, { once: true });
     // eslint-disable-next-line no-async-promise-executor
     this.#docShellSwitchPromise = new Promise(async resolve => {
-      await this.#onTabSwitchOrWindowFocus(window);
-      window.removeEventListener("TabSelect", onTabSelect);
-      resolve();
-      this.#docShellSwitchPromise = null;
+      // gh-13027: always clear #docShellSwitchPromise, even if the swap throws,
+      // so a single failed swap can't permanently jam window-sync.
+      try {
+        await this.#onTabSwitchOrWindowFocus(window);
+      } catch (e) {
+        console.error("ZenWindowSync on_focus error:", e);
+      } finally {
+        window.removeEventListener("TabSelect", onTabSelect);
+        resolve();
+        this.#docShellSwitchPromise = null;
+      }
     });
   }
 
@@ -1520,10 +1551,17 @@ class nsZenWindowSync {
     }
     // eslint-disable-next-line no-async-promise-executor
     this.#docShellSwitchPromise = new Promise(async resolve => {
-      await promise;
-      await this.#onTabSwitchOrWindowFocus(tab.ownerGlobal, previousTab);
-      resolve();
-      this.#docShellSwitchPromise = null;
+      // gh-13027: always clear #docShellSwitchPromise, even if the swap throws,
+      // so a single failed swap can't permanently jam window-sync.
+      try {
+        await promise;
+        await this.#onTabSwitchOrWindowFocus(tab.ownerGlobal, previousTab);
+      } catch (e) {
+        console.error("ZenWindowSync on_TabSelect error:", e);
+      } finally {
+        resolve();
+        this.#docShellSwitchPromise = null;
+      }
     });
   }
 
@@ -1540,8 +1578,15 @@ class nsZenWindowSync {
       this.#moveAllActiveTabsToOtherWindowsForClose(window);
     } catch (e) {
       console.error(`Error moving active tabs to other windows on close:`, e);
+    } finally {
+      // gh-13027: clear #docShellSwitchPromise after the close-time hand-off.
+      // If left set, the field stays a (resolved but truthy) promise forever,
+      // so every later on_TabSelect/on_focus hits `if (this.#docShellSwitchPromise)
+      // return;` and is skipped -- permanently jamming window-sync after the
+      // first window close and leaving synced tabs stuck on "New Tab".
+      resolve();
+      this.#docShellSwitchPromise = null;
     }
-    resolve();
   }
 
   on_WindowCloseAndBrowserFlushed(aBrowsers) {
