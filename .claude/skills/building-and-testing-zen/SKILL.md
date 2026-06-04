@@ -24,6 +24,26 @@ and sets `LD_LIBRARY_PATH` for libstdc++. If a built binary fails with
 `error while loading shared libraries: libgtk-3.so.0 / libstdc++.so.6`, the GUI
 lib dirs aren't on `LD_LIBRARY_PATH` at run time — fix devenv, not the code.
 
+## The mochitest proxy (ssltunnel) — the biggest test gotcha
+
+Symptom: many URL-loading tests **time out ~47s** with `the window unloaded
+while we were waiting for the browser to load`, and (non-headless) the test
+browser shows **"The proxy server is refusing connections … example.com"**.
+`about:blank`-only tests (e.g. `tab-tree`) pass — that's the tell.
+
+Cause: the mochitest runner launches helper binaries (notably **`ssltunnel`**,
+the SSL proxy that routes `https://example.com` / `mochi.test` to the local test
+server) with a **sanitized env that drops `LD_LIBRARY_PATH`**, so ssltunnel
+can't load libstdc++ (`ssltunnel: error while loading shared libraries:
+libstdc++.so.6`), the proxy refuses connections, and every test that loads a real
+URL hangs. NOT a `--headless` problem, NOT your code.
+
+Fix: embed the lib path into ssltunnel's RUNPATH (env-independent). **`devenv.nix`
+now does this automatically on shell entry** (`patchelf --add-rpath` on
+`engine/obj-*/dist/bin/ssltunnel`). A full `mach build` rebuilds ssltunnel — just
+re-enter the shell (or run the next `devenv shell`/`npm test`, which re-applies).
+Manual one-off: `patchelf --add-rpath "$ORIGIN:<gcc-lib>/lib" <objdir>/dist/bin/ssltunnel`.
+
 ## src ↔ engine model (read this first)
 
 - `engine/zen/*` and the Zen-authored `engine/browser/...` files are **symlinks
@@ -50,7 +70,8 @@ lib dirs aren't on `LD_LIBRARY_PATH` at run time — fix devenv, not the code.
 ## en-US locale (critical, easy to miss)
 
 Zen's English strings live in `locales/en-US/browser/browser/zen-*.ftl` but must
-be copied into the build:
+be copied into the build. **`devenv.nix` enterShell now does this automatically**
+when they're missing; the manual command is:
 
 ```bash
 python3 scripts/update_en_US_packs.py   # from repo root, then rebuild
@@ -58,7 +79,7 @@ python3 scripts/update_en_US_packs.py   # from repo root, then rebuild
 
 If skipped, the browser/tests throw `Missing resource in locale en-US:
 browser/zen-*.ftl` and `Couldn't find a message: ...`. These surface as
-**uncaught rejections in new-window UI** and break ALL `window_sync` tests.
+**uncaught rejections in new-window UI** and break the `window_sync` tests.
 
 ## Registering a new Zen chrome component (.mjs)
 
@@ -143,6 +164,7 @@ npm run lint        # = ./mach lint zen   (operates on engine/, post-import)
 | `Couldn't find a message` / `Missing resource ... zen-*.ftl` | run `python3 scripts/update_en_US_packs.py` + rebuild |
 | `patch does not apply` during `npm run import` | engine already patched; don't re-import — restore the file pristine + `git -C engine apply` the one patch |
 | `window.gX is undefined` | component not added to `ZenPreloadedScripts.js` |
-| test hangs ~47s on `addNormalTab` | `browserLoaded()` on `about:blank` |
+| many URL-loading tests time out ~47s; "window unloaded while waiting for browser to load"; "proxy refusing connections at example.com" | `ssltunnel` can't load libstdc++ → fixed by devenv enterShell (patchelf rpath); a full `mach build` rebuilds it, re-enter the shell |
+| one test hangs ~47s on `addNormalTab`/a tab open | `browserLoaded()` on `about:blank` — don't await it |
 | test fails on `assertNoUncaughtRejections` | whitelist benign rejection via `add_setup` |
 | `Found an unexpected tab` in window_sync | clean up the sync-mirrored blank tab |

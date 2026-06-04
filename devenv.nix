@@ -52,6 +52,8 @@ in
     pkgs.nasm
     # cbindgen generates C/C++ headers from Rust (style system, webrender).
     pkgs.rust-cbindgen
+    # patchelf embeds RUNPATH into mochitest helper binaries (see enterShell).
+    pkgs.patchelf
   ]
   # Native libraries Zen/Firefox links against (gtk3, alsa, X11, nss, dbus,
   # ...). Reuse nixpkgs' Firefox dependency set instead of hand-maintaining it.
@@ -66,5 +68,34 @@ in
   # that `mach run`/`mach test` need.
   enterShell = ''
     export LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}${engineLibPath}"
+
+    # The mochitest runner launches helper binaries with a sanitized environment
+    # that drops LD_LIBRARY_PATH. ssltunnel (the SSL proxy that routes
+    # https://example.com etc. to the local test server) then can't load
+    # libstdc++, the proxy "refuses connections", and every URL-loading test
+    # hangs ("window unloaded while we were waiting for the browser to load").
+    # about:blank-only tests are unaffected. Embed the engine lib path into the
+    # binary's RUNPATH so it runs regardless of env. Idempotent; runs whenever
+    # the engine is built. (A full `mach build` rebuilds ssltunnel — re-enter
+    # the shell, or this re-applies on the next `devenv shell`.)
+    for _bin in engine/obj-*/dist/bin/ssltunnel; do
+      if [ -x "$_bin" ] \
+         && ! patchelf --print-rpath "$_bin" 2>/dev/null \
+              | grep -qF "${pkgs.stdenv.cc.cc.lib}/lib"; then
+        patchelf --add-rpath '$ORIGIN:${engineLibPath}' "$_bin" 2>/dev/null \
+          && echo "devenv: embedded RUNPATH into ssltunnel (mochitest proxy fix)"
+      fi
+    done
+
+    # Zen's en-US Fluent strings live in locales/en-US/ but aren't copied into
+    # the build by default; without them the browser/tests throw
+    # "Couldn't find a message: ..." and "Missing resource in locale en-US:
+    # browser/zen-*.ftl" — which fail window_sync/new-window tests via uncaught
+    # rejections. Copy them into the build if the engine is imported but missing.
+    if [ -d engine/browser/locales/en-US/browser ] \
+       && [ ! -f engine/browser/locales/en-US/browser/zen-vertical-tabs.ftl ]; then
+      python3 scripts/update_en_US_packs.py >/dev/null 2>&1 \
+        && echo "devenv: copied en-US Zen locale strings into the build"
+    fi
   '';
 }
