@@ -1542,6 +1542,7 @@ class nsZenWindowSync {
       console.error(`Error moving active tabs to other windows on close:`, e);
     }
     resolve();
+    this.#docShellSwitchPromise = null;
   }
 
   on_WindowCloseAndBrowserFlushed(aBrowsers) {
