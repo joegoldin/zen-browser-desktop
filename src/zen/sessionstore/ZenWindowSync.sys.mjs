@@ -911,7 +911,7 @@ class nsZenWindowSync {
           aOtherTab.linkedBrowser.loadURI(Services.io.newURI("about:blank"), {
             triggeringPrincipal:
               Services.scriptSecurityManager.getSystemPrincipal(),
-            loadFlags: Ci.nsIWebNavigation.LOAD_FLAGS_REPLACE_HISTORY,
+            loadFlags: Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_HISTORY,
           });
         }
       },
@@ -1499,12 +1499,15 @@ class nsZenWindowSync {
     this.#lastSelectedTab = new WeakRef(window.gBrowser.selectedTab);
     window.addEventListener("TabSelect", onTabSelect, { once: true });
     // eslint-disable-next-line no-async-promise-executor
-    this.#docShellSwitchPromise = new Promise(async resolve => {
+    const swap = new Promise(async resolve => {
       await this.#onTabSwitchOrWindowFocus(window);
       window.removeEventListener("TabSelect", onTabSelect);
       resolve();
-      this.#docShellSwitchPromise = null;
+      if (this.#docShellSwitchPromise === swap) {
+        this.#docShellSwitchPromise = null;
+      }
     });
+    this.#docShellSwitchPromise = swap;
   }
 
   on_TabSelect(aEvent, { ignorePromise = false } = {}) {
@@ -1519,12 +1522,15 @@ class nsZenWindowSync {
       return;
     }
     // eslint-disable-next-line no-async-promise-executor
-    this.#docShellSwitchPromise = new Promise(async resolve => {
+    const swap = new Promise(async resolve => {
       await promise;
       await this.#onTabSwitchOrWindowFocus(tab.ownerGlobal, previousTab);
       resolve();
-      this.#docShellSwitchPromise = null;
+      if (this.#docShellSwitchPromise === swap) {
+        this.#docShellSwitchPromise = null;
+      }
     });
+    this.#docShellSwitchPromise = swap;
   }
 
   on_SSWindowClosing(aEvent) {
