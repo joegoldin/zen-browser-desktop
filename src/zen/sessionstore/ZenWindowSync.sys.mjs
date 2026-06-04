@@ -200,6 +200,19 @@ class nsZenWindowSync {
   }
 
   /**
+   * Whether a tab currently displays live page content rather than the
+   * "about:blank" placeholder loaded into a browser whose contents were
+   * swapped out to another window.
+   *
+   * @param {MozTabbrowserTab} aTab - The tab to check.
+   * @returns {boolean} True unless the tab is blank or has no current URI.
+   */
+  #hasLiveContent(aTab) {
+    const spec = aTab?.linkedBrowser?.currentURI?.spec;
+    return !!(spec && spec !== "about:blank");
+  }
+
+  /**
    * Called when a browser window is about to be shown.
    * Adds event listeners for the specified events.
    *
@@ -911,7 +924,7 @@ class nsZenWindowSync {
           aOtherTab.linkedBrowser.loadURI(Services.io.newURI("about:blank"), {
             triggeringPrincipal:
               Services.scriptSecurityManager.getSystemPrincipal(),
-            loadFlags: Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_HISTORY,
+            loadFlags: Ci.nsIWebNavigation.LOAD_FLAGS_REPLACE_HISTORY,
           });
         }
       },
@@ -1154,12 +1167,16 @@ class nsZenWindowSync {
         aWindow,
         selectedTab.id
       );
+      const selHasContent = this.#hasLiveContent(selectedTab);
+      const otherHasContent = this.#hasLiveContent(otherSelectedTab);
       selectedTab._zenContentsVisible = true;
-      if (otherSelectedTab) {
+      if (otherSelectedTab && !selHasContent && otherHasContent) {
         delete otherSelectedTab._zenContentsVisible;
         promises.push(
           this.#swapBrowserDocShellsAsync(selectedTab, otherSelectedTab)
         );
+      } else if (otherSelectedTab && !otherHasContent && !selHasContent) {
+        delete otherSelectedTab._zenContentsVisible;
       }
     }
     await Promise.all(promises);
@@ -1499,15 +1516,12 @@ class nsZenWindowSync {
     this.#lastSelectedTab = new WeakRef(window.gBrowser.selectedTab);
     window.addEventListener("TabSelect", onTabSelect, { once: true });
     // eslint-disable-next-line no-async-promise-executor
-    const swap = new Promise(async resolve => {
+    this.#docShellSwitchPromise = new Promise(async resolve => {
       await this.#onTabSwitchOrWindowFocus(window);
       window.removeEventListener("TabSelect", onTabSelect);
       resolve();
-      if (this.#docShellSwitchPromise === swap) {
-        this.#docShellSwitchPromise = null;
-      }
+      this.#docShellSwitchPromise = null;
     });
-    this.#docShellSwitchPromise = swap;
   }
 
   on_TabSelect(aEvent, { ignorePromise = false } = {}) {
@@ -1522,15 +1536,12 @@ class nsZenWindowSync {
       return;
     }
     // eslint-disable-next-line no-async-promise-executor
-    const swap = new Promise(async resolve => {
+    this.#docShellSwitchPromise = new Promise(async resolve => {
       await promise;
       await this.#onTabSwitchOrWindowFocus(tab.ownerGlobal, previousTab);
       resolve();
-      if (this.#docShellSwitchPromise === swap) {
-        this.#docShellSwitchPromise = null;
-      }
+      this.#docShellSwitchPromise = null;
     });
-    this.#docShellSwitchPromise = swap;
   }
 
   on_SSWindowClosing(aEvent) {
