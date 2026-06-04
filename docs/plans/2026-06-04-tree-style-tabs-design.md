@@ -35,12 +35,17 @@ container structure.
 - Tab-as-parent model (parent stays a clickable tab).
 - Opener-based auto-nesting, behind a pref defaulting ON.
 - Drag gestures: quick-drop-on-tab nests; hold (~300ms) escalates to split; gaps reorder.
+- Dragging a parent tab moves its entire subtree, preserving the internal hierarchy at the
+  destination and depth-clamping when needed (deepest levels flatten first).
+- Dragging a multi-selection makes every selected tab a *direct* child (one level) of the
+  destination; each selected tab's own unselected descendants travel with it.
 - Close-parent behavior is a pref; default is "promote children".
 - Scope is unpinned tabs only; pinned tabs keep the existing folder system, unchanged.
 - Middle-mouse drag-select: contiguous range; release closes; right-click-while-held aborts
   the close and opens the context menu; clean middle-click still closes a single tab; new
   drag replaces prior selection (Ctrl to add).
-- `max-depth` default = 4.
+- `max-depth` default = 4 (maximum *level* a tab may have; root = level 0).
+- Correct window-sync of tree state is a hard requirement, not deferrable.
 
 ## 2. Component map
 
@@ -96,9 +101,14 @@ manager always maintains four invariants:
 1. **DFS order** — within a workspace's normal-tabs container, DOM order equals a pre-order
    traversal of the forest, so a tab's descendants are contiguous and immediately follow it.
 2. **Level** — `level(child) = level(parent) + 1`; roots are level 0.
-3. **Indent** — `--zen-folder-indent = level × zen.tab-tree.indent` (default 14px), with depth
-   capped at `zen.tab-tree.max-depth` (default 4).
-4. **Collapse** — descendants of a collapsed tab carry `zen-tree-hidden` and are hidden via CSS.
+3. **Indent** — `--zen-folder-indent = level × zen.tab-tree.indent` (default 14px).
+4. **Depth cap** — no tab's level may exceed `zen.tab-tree.max-depth` (default 4; root = level
+   0). When a re-parent would push descendants past the cap, the overflow is *flattened from
+   the deepest levels first*: any node whose computed level would exceed `max-depth` is clamped
+   to `max-depth` (re-parented to the nearest ancestor at `max-depth − 1`), so the levels that
+   would have sat below the cap collapse together at the cap boundary. `max-depth = 0` disables
+   the cap.
+5. **Collapse** — descendants of a collapsed tab carry `zen-tree-hidden` and are hidden via CSS.
 
 Maintaining the DFS invariant on every move/open/close is the core complexity. All tree
 mutations funnel through `gZenTabTree` so ordering cannot drift; the manager also observes
@@ -106,10 +116,15 @@ mutations funnel through `gZenTabTree` so ordering cannot drift; the manager als
 
 ### Manager API (sketch)
 
-- `nestTab(child, parent, { position })` — set parent; move child + its subtree to be
-  contiguous after the parent's existing children; recompute levels/indent; persist.
+- `nestTab(child, parent, { position })` — set parent; move child + its **entire subtree** to be
+  contiguous after the parent's existing children; recompute levels/indent; apply the depth cap
+  (§3 invariant 4); persist.
+- `nestTabsAsChildren(tabs, parent)` — make each tab in `tabs` a *direct* child (one level) of
+  `parent`; each tab's own unselected descendants travel with it as its subtree; apply the
+  depth cap; persist. (Used for multi-selection drops.)
 - `detachTab(tab)` / `promoteSubtree(tab)` — make a tab a root or reparent it to its
   grandparent.
+- `clampDepth(tab)` — flatten any descendants of `tab` past `max-depth` up to the cap.
 - `getChildren(tab)`, `getDescendants(tab)`, `getSubtreeRange(tab)`.
 - `toggleCollapse(tab)` — flip collapsed; hide/show descendants (animated); if the active tab
   would be hidden, select the nearest visible ancestor.
@@ -133,12 +148,21 @@ A new `#dragOverNest` machine mirrors `#dragOverSplit`:
 - **Drop in the gap (top/bottom edge zone)** → reorder as sibling via the existing
   `_animateTabMove` path, keeping the current parent.
 - On `handle_drop`: if `#dragOverSplit.canDrop` → split (existing `#handle_dropCreateSplit`);
-  else if `#dragOverNest.canDrop` → `gZenTabTree.nestTab(draggedTab, targetTab)`; else →
-  reorder (existing).
-- A multi-selection dragged onto a tab nests all selected tabs as children.
+  else if `#dragOverNest.canDrop` → nest (see below); else → reorder (existing).
 - Excluded from nesting (mirroring split exclusions): essentials (`zen-essential`), glance
   (`zen-glance-tab`), empty (`zen-empty-tab`), split-view groups (`split-view-group`), live
   folders (`zen-live-folder-item-id`), and pinned tabs.
+
+### Moving subtrees and multi-selection (depth-clamped)
+
+- **Dragging a parent tab** moves its **entire subtree** — parent plus all descendants. The
+  internal hierarchy is preserved at the destination; only the root of the dragged subtree is
+  re-parented under the target (`gZenTabTree.nestTab`). If destination depth + subtree depth
+  exceeds `max-depth`, the overflow flattens from the deepest levels first (§3 invariant 4).
+- **Dragging a multi-selection** onto a target makes **every selected tab a direct child (one
+  level)** of the target (`gZenTabTree.nestTabsAsChildren`). Each selected tab keeps its own
+  unselected descendants as its subtree (those move with it), and the depth cap is applied
+  afterward. Selection order determines child order.
 
 ### Collapse
 
@@ -166,8 +190,11 @@ mirrors the existing `zen.folders.owned-tabs-in-folder` pattern.
 - **Persistence** — per-tab `zen-tree-parent` + `zen-tree-collapsed` serialized via
   `ZenSessionManager`. Restore is a two-pass process like folders' `parentId` restore: build
   tabs, rebuild parent links, then re-apply DFS order / levels / indent / collapse.
-- **Window sync** — `ZenWindowSync` must carry the same tree state. Flagged as a correctness
-  hotspot given recent churn there (e.g., gh-13027).
+- **Window sync (required)** — `ZenWindowSync` must replicate full tree state (parent links,
+  collapse, DFS order) across synced windows, and keep it consistent as tabs are nested,
+  moved, collapsed, promoted, or closed in any synced window. This is a first-class
+  requirement, not optional. It is also the highest-risk area given recent churn there (e.g.,
+  gh-13027); it gets dedicated tests (§8).
 
 ## 6. Middle-mouse drag-select (Feature B)
 
@@ -206,10 +233,16 @@ Safety nets: Firefox's undo-close-tab plus the right-click escape hatch.
 
 Mochitest browser tests mirroring `src/zen/tests/folders/`:
 
-- **Tree:** nest-by-drag; depth/level checks; `max-depth` cap; collapse hides descendants;
+- **Tree:** nest-by-drag; depth/level checks; `max-depth` cap; **dragging a parent moves the
+  whole subtree with hierarchy preserved**; **depth-clamping flattens deepest levels first**
+  when a subtree drop would overflow the cap; **multi-selection drop makes all selected direct
+  children (one level)** with their own subtrees following; collapse hides descendants;
   promote-vs-close-subtree on parent close; opener auto-nest; reorder keeps vs changes parent;
   pin detaches; persistence across restart; split escalation still fires after the hold;
   exclusions (essential / glance / empty / split-group / live-folder / pinned).
+- **Window sync (dedicated suite):** nest/move/collapse/promote/close performed in one synced
+  window replicate correctly to another; DFS order and parent links stay consistent; restart +
+  sync round-trip preserves the tree. Modeled on `src/zen/tests/window_sync/`.
 - **Middle-mouse drag-select:** range select; release closes; right-click aborts and opens
   context menu; clean middle-click closes one; Ctrl additive; movement threshold respected.
 
@@ -220,14 +253,19 @@ Mochitest browser tests mirroring `src/zen/tests/folders/`:
 - **Three-way drag zones** (reorder / nest / split) must feel unambiguous — tuned thresholds +
   distinct indicators, all pref-gated.
 - **Session restore + window sync** for tree state is the area most likely to harbor subtle
-  bugs (recent commits touched exactly this code).
+  bugs (recent commits touched exactly this code). Window sync is a required deliverable (§5),
+  so this risk must be retired, not deferred — it carries a dedicated test suite.
+- **Depth-clamping** when moving subtrees/multi-selections near the cap must be deterministic
+  and lossless (no tab dropped, no orphaned parent link); covered by targeted tests.
 - **Middle-button defaults** (autoscroll, Linux paste, single middle-click-close) must survive
   the non-drag case.
 
 ## 10. Default decisions (changeable)
 
-- `max-depth = 4`.
-- Nesting a multi-selection nests all selected tabs.
+- `max-depth = 4` (maximum level; root = 0).
+- Dragging a parent moves its whole subtree; depth overflow flattens deepest-first.
+- Multi-selection drop makes all selected tabs direct children (one level) of the target.
 - Pinning a tree tab detaches it (promotes its children).
 - Collapsing moves selection to the nearest visible ancestor.
+- Window sync of tree state is required (in scope, with a dedicated test suite).
 - New components live under `src/zen/tab-tree/`.
