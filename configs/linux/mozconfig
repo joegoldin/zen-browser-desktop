@@ -2,6 +2,35 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+# Setting the compiler based on the existence of clang bin directory
+if test -d "$HOME/.mozbuild/clang/bin"; then
+    export CC="$HOME/.mozbuild/clang/bin/clang"
+    export CXX="$HOME/.mozbuild/clang/bin/clang++"
+else
+    export CC=clang
+    export CXX=clang++
+fi
+
+# Building inside the Nix devenv: the toolchain comes from nixpkgs instead of
+# `mach bootstrap`, so a couple of paths need pointing out. No-op otherwise.
+if test -n "$DEVENV_ROOT"; then
+    # The Nix stdenv exports AS=as (GNU as), which the NSPR sub-build feeds
+    # clang-driver "-Wa," flags it can't parse. Assemble with the clang driver.
+    export AS="$CC"
+
+    # Nix keeps libclang.so in a separate output from the clang resource dir,
+    # so configure's autodetection misses it; point it at LIBCLANG_PATH.
+    if test -n "$LIBCLANG_PATH"; then
+        ac_add_options --with-libclang-path="$LIBCLANG_PATH"
+    fi
+
+    # The devenv ships no wasm32-wasi sysroot, so disable RLBox wasm sandboxing
+    # for local dev builds (release/CI builds bootstrap their own sysroot).
+    if ! test "$ZEN_RELEASE"; then
+        ac_add_options --without-wasm-sandboxed-libraries
+    fi
+fi
+
 if test "$ZEN_RELEASE"; then
     if test "$SURFER_COMPAT" = "x86_64"; then
         ac_add_options --target=x86_64-pc-linux
