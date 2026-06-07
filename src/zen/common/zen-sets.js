@@ -47,6 +47,9 @@ document.addEventListener(
           case "cmd_zenCopyCurrentURL":
             gZenCommonActions.copyCurrentURLToClipboard();
             break;
+          case "cmd_zenCopyTabLink":
+            gZenCommonActions.copyTabLinkToClipboard();
+            break;
           case "cmd_zenPinnedTabReset":
             gZenPinnedTabManager.resetPinnedTab(gBrowser.selectedTab);
             break;

@@ -30,6 +30,13 @@ tab-context-zen-edit-title =
     .label = Change Label...
 tab-context-zen-edit-icon =
     .label = Change Icon...
+tab-context-zen-copy-link =
+    .label =
+        { $tabCount ->
+            [1] Copy Tab Link
+           *[other] Copy { $tabCount } Selected Tab Links
+        }
+    .accesskey = L
 
 zen-themes-corrupted = Your { -brand-short-name } mods file is corrupted. They have been reset to the default theme.
 zen-shortcuts-corrupted = Your { -brand-short-name } shortcuts file is corrupted. They have been reset to the default shortcuts.
@@ -48,6 +55,11 @@ zen-panel-ui-gradient-generator-custom-color = Custom Color
 
 zen-copy-current-url-confirmation = Copied current URL!
 zen-copy-current-url-as-markdown-confirmation = Copied current URL as Markdown!
+zen-copy-tab-link-confirmation =
+    { $tabCount ->
+        [1] Copied tab link!
+       *[other] Copied { $tabCount } tab links!
+    }
 
 zen-general-cancel-label =
     .label = Cancel

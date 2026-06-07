@@ -148,6 +148,51 @@ window.gZenCommonActions = {
     });
   },
 
+  // Copies the link(s) of the tab(s) targeted by the tab context menu. When the
+  // context tab is part of a multi-selection, every selected tab's link is
+  // copied, one per line.
+  copyTabLinkToClipboard() {
+    const contextTab = TabContextMenu.contextTab || gBrowser.selectedTab;
+    if (!contextTab) {
+      return;
+    }
+    const tabs = contextTab.multiselected
+      ? gBrowser.selectedTabs
+      : [contextTab];
+    const decodeOnCopy = Services.prefs.getBoolPref(
+      "browser.urlbar.decodeURLsOnCopy",
+      false
+    );
+
+    const links = [];
+    for (const tab of tabs) {
+      const uri = tab.linkedBrowser?.currentURI;
+      if (!uri) {
+        continue;
+      }
+      let displaySpec = uri.displaySpec;
+      try {
+        if (decodeOnCopy && !uri.schemeIs("data")) {
+          displaySpec = decodeURI(displaySpec);
+        }
+      } catch (e) {}
+      links.push(displaySpec);
+    }
+
+    if (!links.length) {
+      return;
+    }
+
+    Cc["@mozilla.org/widget/clipboardhelper;1"]
+      .getService(Ci.nsIClipboardHelper)
+      .copyString(links.join("\n"));
+
+    gZenUIManager.showToast("zen-copy-tab-link-confirmation", {
+      l10nArgs: { tabCount: links.length },
+      timeout: 3000,
+    });
+  },
+
   throttle(f, delay) {
     let timer = 0;
     return function (...args) {

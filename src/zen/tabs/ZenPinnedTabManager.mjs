@@ -574,6 +574,10 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
                       hidden="true"/>
             <menuitem id="context_zen-edit-tab-icon"
                       data-lazy-l10n-id="tab-context-zen-edit-icon"/>
+            <menuitem id="context_zen-copy-tab-link"
+                      data-lazy-l10n-id="tab-context-zen-copy-link"
+                      data-l10n-args='{"tabCount": 1}'
+                      command="cmd_zenCopyTabLink"/>
             <menuseparator/>
         `);
 
@@ -655,6 +659,12 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
       isEssential ||
       !Services.prefs.getBoolPref("zen.tabs.rename-tabs") ||
       !gZenVerticalTabsManager._prefsSidebarExpanded;
+    const zenCopyTabLink = document.getElementById("context_zen-copy-tab-link");
+    if (zenCopyTabLink) {
+      document.l10n.setAttributes(zenCopyTabLink, "tab-context-zen-copy-link", {
+        tabCount: contextTab.multiselected ? gBrowser.selectedTabs.length : 1,
+      });
+    }
   }
 
   // eslint-disable-next-line complexity
