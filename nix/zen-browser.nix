@@ -138,11 +138,11 @@ in
     # scripts out of the read-only store, then rewrite the two folder constants
     # (the source folder -> the vendored configs/dumps; the engine folder ->
     # relative, since we are already at the Firefox source root).
-    scripts="$(mktemp -d)"
-    cp -r "${zen-src}/scripts/." "$scripts"
-    sed -i '9,15c\
-    DUMPS_FOLDER = "${zen-src}/configs/dumps"\
-    ENGINE_DUMPS_FOLDER = "services/settings/dumps/main"' $scripts/update_service_dumps.py
+    # Rewrite the folder constants without relying on hard-coded line numbers.
+    sed -i \
+      -e '/^DUMPS_FOLDER =/,/^)$/c\DUMPS_FOLDER = "${zen-src}/configs/dumps"' \
+      -e '/^ENGINE_DUMPS_FOLDER =/,/^)$/c\ENGINE_DUMPS_FOLDER = "services/settings/dumps/main"' \
+      "$scripts/update_service_dumps.py"
 
     python $scripts/update_service_dumps.py
 
