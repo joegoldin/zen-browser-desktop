@@ -1,0 +1,198 @@
+# Keeps a `nightly` branch = "dev, as if all my open PRs were merged", and nightly
+# keeps `dev` itself current with the upstream parent repo. Two jobs:
+#
+#   sync-dev-from-upstream  (schedule / manual): REBASE dev onto upstream's dev —
+#       reset dev to upstream, then replay this fork's only local change on dev
+#       (THIS workflow file) on top. Linear, no merge commits. Needs a PAT
+#       (NIGHTLY_TOKEN) since GITHUB_TOKEN can't read upstream's git API or write
+#       .github/workflows files. Supersedes the PR-based sync for dev.
+#
+#   rebuild-nightly  (after the sync; also on PR changes / manual): reset nightly
+#       to dev, then SQUASH-merge every open PR by the fork owner that targets dev
+#       (one commit per PR), skipping any that aren't auto-mergeable. Uses
+#       GITHUB_TOKEN.
+#
+# Everything is via the GitHub API — no checkout, no git identity (commits are
+# authored by the bot). `nightly` is what the dotfiles flake builds from.
+name: nightly-integration
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, closed]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 9 * * *" # ~02:00 America/Los_Angeles, nightly
+
+concurrency:
+  group: nightly-integration
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  sync-dev-from-upstream:
+    # Nightly (and on manual runs) rebase dev onto upstream, ahead of rebuild-nightly.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rebase dev onto upstream (reset to upstream + replay this workflow)
+        env:
+          # Needs a fine-grained PAT (this repo: Contents RW + Workflows RW),
+          # stored as NIGHTLY_TOKEN: the default GITHUB_TOKEN can't read upstream's
+          # git API (cross-repo) or rewrite .github/workflows files.
+          GH_TOKEN: ${{ secrets.NIGHTLY_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::NIGHTLY_TOKEN secret is not set. Create a fine-grained PAT (repo $REPO; Contents: RW + Workflows: RW) and add it as the NIGHTLY_TOKEN Actions secret."
+            exit 1
+          fi
+          echo "## Upstream → dev (rebase)" >> "$GITHUB_STEP_SUMMARY"
+
+          upstream=$(gh api "repos/$REPO" --jq '.parent.full_name // empty')
+          if [ -z "$upstream" ]; then
+            echo "No upstream parent repo — skipped." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          up_sha=$(gh api "repos/$upstream/git/ref/heads/dev" --jq '.object.sha')
+          dev_sha=$(gh api "repos/$REPO/git/ref/heads/dev" --jq '.object.sha')
+
+          # Our ONLY local change on dev vs upstream is this workflow file.
+          # Snapshot it from the current dev so we can replay it after the reset.
+          wf=".github/workflows/nightly-integration.yml"
+          content=$(gh api "repos/$REPO/contents/$wf?ref=$dev_sha" --jq '.content' | tr -d '\n')
+
+          # Rebase: reset dev onto upstream/dev (linear, no merge commit) ...
+          gh api --method PATCH "repos/$REPO/git/refs/heads/dev" \
+            -f sha="$up_sha" -F force=true >/dev/null
+
+          # ... then replay this one file as a single bot-authored commit on top.
+          put=(-f message="ci: nightly-integration workflow" -f content="$content" -f branch="dev")
+          existing=$(gh api "repos/$REPO/contents/$wf?ref=dev" --jq '.sha' 2>/dev/null || echo "")
+          [ -n "$existing" ] && put+=(-f sha="$existing")
+          gh api --method PUT "repos/$REPO/contents/$wf" "${put[@]}" >/dev/null
+
+          echo "Rebased \`dev\` onto [\`$upstream@${up_sha:0:9}\`](https://github.com/$upstream/commit/$up_sha) and replayed the workflow." >> "$GITHUB_STEP_SUMMARY"
+
+  rebuild-nightly:
+    needs: [sync-dev-from-upstream]
+    # Run after the sync when it ran (schedule / dispatch), and on same-repo PR
+    # changes where the sync is skipped — never block on a skipped sync.
+    if: >-
+      always() &&
+      (needs.sync-dev-from-upstream.result == 'success' ||
+       needs.sync-dev-from-upstream.result == 'skipped') &&
+      (github.event_name == 'workflow_dispatch' ||
+       github.event_name == 'schedule' ||
+       (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rebuild nightly = dev + squashed conflict-free PRs by ${{ github.repository_owner }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          # NOT `set -e`: one PR's merge issue must never abort the whole rebuild.
+          # Each step is guarded explicitly and classified as integrated / skipped
+          # (conflict) / errored, so the outcome is always legible.
+          set -uo pipefail
+
+          dev_sha=$(gh api "repos/$REPO/git/ref/heads/dev" --jq '.object.sha') || {
+            echo "::error::Could not read dev ref."; exit 1; }
+
+          # Reset nightly to dev (create if missing). Ref update only — no commit.
+          if gh api "repos/$REPO/git/ref/heads/nightly" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/$REPO/git/refs/heads/nightly" \
+              -f sha="$dev_sha" -F force=true >/dev/null \
+              || { echo "::error::Could not reset nightly to dev (${dev_sha:0:9})."; exit 1; }
+          else
+            gh api --method POST "repos/$REPO/git/refs" \
+              -f ref="refs/heads/nightly" -f sha="$dev_sha" >/dev/null \
+              || { echo "::error::Could not create nightly at dev (${dev_sha:0:9})."; exit 1; }
+          fi
+
+          # SQUASH each open PR by the owner onto nightly, identity-free: API 3-way
+          # merge to get the merged tree, then re-wrap it as one single-parent
+          # commit (Git Data API authors as the bot — no checkout/identity).
+          # nightly stays linear: dev + one squash commit per PR. A PR that
+          # conflicts is SKIPPED (the run stays green — rebase the PR to integrate
+          # it); only genuine API failures turn the run red.
+          pre="$dev_sha"
+          merged=(); skipped=(); errored=()
+          while IFS=$'\t' read -r num branch; do
+            [ -z "${branch:-}" ] && continue
+            [ "$branch" = "nightly" ] && continue
+            link="[#$num](https://github.com/$REPO/pull/$num) (\`$branch\`)"
+            echo "::group::PR #$num ($branch)"
+
+            # 3-way merge into nightly. Capture body + exit status so we can tell a
+            # clean merge (201) / already-contained (204) from a conflict (409)
+            # from a real API error — instead of mis-reading a 409 body as a tree.
+            if resp=$(gh api --method POST "repos/$REPO/merges" \
+                        -f base="nightly" -f head="$branch" \
+                        -f commit_message="tmp: merge PR #$num for squash" 2>&1); then
+              mtree=$(printf '%s' "$resp" | jq -r '.commit.tree.sha // empty' 2>/dev/null || echo "")
+              if [ -z "$mtree" ]; then
+                echo "Already contained in nightly — nothing to integrate."
+                echo "::endgroup::"; continue
+              fi
+            else
+              if printf '%s' "$resp" | grep -qiE "merge conflict|not mergeable"; then
+                echo "::warning::PR #$num ($branch) conflicts with nightly — SKIPPED. Rebase the PR onto dev to integrate it."
+                skipped+=("$link — merge conflict")
+              else
+                echo "::error::PR #$num ($branch) merge API failed: $(printf '%s' "$resp" | tr '\n' ' ' | head -c 300)"
+                errored+=("$link — merge API error")
+              fi
+              echo "::endgroup::"; continue
+            fi
+
+            # Re-wrap the merged tree as one squash commit (parent = tip before
+            # this PR), then move nightly onto it (the throwaway merge is orphaned).
+            if ! sq=$(gh api --method POST "repos/$REPO/git/commits" \
+                        -f message="nightly: squash PR #$num ($branch)" \
+                        -f tree="$mtree" -f "parents[]=$pre" --jq '.sha' 2>&1); then
+              echo "::error::PR #$num ($branch) could not create squash commit: $(printf '%s' "$sq" | tr '\n' ' ' | head -c 300)"
+              errored+=("$link — commit error")
+              echo "::endgroup::"; continue
+            fi
+            if ! gh api --method PATCH "repos/$REPO/git/refs/heads/nightly" \
+                   -f sha="$sq" -F force=true >/dev/null 2>&1; then
+              echo "::error::PR #$num ($branch) could not advance nightly to ${sq:0:9}."
+              errored+=("$link — ref update error")
+              echo "::endgroup::"; continue
+            fi
+
+            pre="$sq"
+            merged+=("$link")
+            echo "Integrated as ${sq:0:9}."
+            echo "::endgroup::"
+          done < <(
+            gh pr list --repo "$REPO" --state open --base dev --author "$OWNER" \
+              --json number,headRefName \
+              --jq '.[] | "\(.number)\t\(.headRefName)"' | sort -n
+          )
+
+          {
+            echo "## Nightly integration"
+            echo "Base \`dev\` @ [\`${dev_sha:0:9}\`](https://github.com/$REPO/commit/$dev_sha) → [\`nightly\`](https://github.com/$REPO/tree/nightly)"
+            echo ""
+            echo "| Outcome | PRs |"
+            echo "| --- | --- |"
+            echo "| ✅ Integrated | ${merged[*]:-—} |"
+            echo "| ⏭️ Skipped (conflict — rebase the PR) | ${skipped[*]:-—} |"
+            echo "| ❌ Errored | ${errored[*]:-—} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "Integrated ${#merged[@]}, skipped ${#skipped[@]} (conflict), errored ${#errored[@]}."
+
+          # Conflicts are expected and keep the run green; only real API errors fail it.
+          if [ "${#errored[@]}" -gt 0 ]; then
+            echo "::error::Nightly rebuild hit ${#errored[@]} unexpected error(s) — see the job summary."
+            exit 1
+          fi
