@@ -175,7 +175,7 @@ index 95f4960c3d8a2a4ca9bce24bcc54971877ee55ca..5bef8eeeb7cc26c930e3884e6eede6ea
        return;
      }
 -    if (aTab == aWindow.FirefoxViewHandler.tab) {
-+    if (aTab == aWindow.FirefoxViewHandler.tab || aTab.hasAttribute("zen-empty-tab")) {
++    if (aTab == aWindow.FirefoxViewHandler.tab || aTab.hasAttribute("zen-empty-tab") || (aTab._zenSyncClosing && !aTab._zenContentsVisible)) {
        return;
      }
  
