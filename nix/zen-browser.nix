@@ -3,7 +3,11 @@
 # (no `surfer`) so everything runs offline inside the build sandbox.
 #
 # Fork-specific deltas from the upstream recipe:
-#   * Firefox 151.0.3 (from the fork's surfer.json).
+#   * Firefox 152.0. surfer.json declares 152.0.1, but nixpkgs-unstable ships
+#     152.0 and the .0.1 dot release doesn't touch any patched file (notably
+#     browser-box.inc.xhtml), so we pin 152.0 to reuse nixpkgs' source hash.
+#     Bump in lockstep whenever upstream's surfer.json bumps the Firefox base
+#     (the Zen patches are regenerated against it; a stale pin fails patchPhase).
 #   * `zen-src` is the fork tree itself (`zen-src-tree` = the flake `self`),
 #     not a tagged github release — so the tree-style-tabs feature (extra
 #     src/ files + new *.patch files) is picked up generically.
@@ -34,10 +38,10 @@ let
 
   firefox-src = fetchurl {
     url = "mirror://mozilla/firefox/releases/${firefox-version}/source/firefox-${firefox-version}.source.tar.xz";
-    hash = "sha512-URcj5c8EKrtmy+2om3jULejRtTVEVlZwFz8+acKnzu/HZGjJBXYiFBi/ybEiFR7BF5eMqkgjz7m4B5fzBkvYlQ==";
+    hash = "sha512-LHrfNnAEBj7p8zheaS9hLY5cDBBmK/KUmWwRgAHkPewSyoy0/XDmeiWpA9v1rfg9IuSH8Evz+TDaKoFcgDeM6w==";
   };
 
-  firefox-version = "151.0.3";
+  firefox-version = "152.0";
 
   # Hard-coded from the fork's surfer.json (kept in sync manually; these values
   # change very rarely). Drives the branding strings in assets.nix.
