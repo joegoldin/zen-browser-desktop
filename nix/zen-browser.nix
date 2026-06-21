@@ -15,6 +15,7 @@
 {
   branding ? "release",
   fetchurl,
+  gitMinimal,
   rsync,
   rustPlatform,
   writeText,
@@ -76,6 +77,7 @@ in
     ;
 
   extraNativeBuildInputs = [
+    gitMinimal
     rsync
   ];
 
@@ -88,18 +90,23 @@ in
     ${ffprefs}/bin/ffprefs .
 
     # Copy the Zen source overlay in, then apply every Zen *.patch against the
-    # Firefox tree (-p1). Skip the two external webrender backports that have
-    # already landed upstream in Firefox ${firefox-version} (their added code is
-    # verified present in the pristine source, so re-applying fails as
-    # "reversed/already applied"). surfer tolerates this upstream; we exclude
-    # them explicitly. Re-check this list if the pinned Firefox version changes.
+    # Firefox tree with `git apply -p1` — the same tool upstream's `surfer` uses.
+    # We deliberately avoid GNU `patch`: it rejects hunks whose trailing context
+    # is a bare struct-closing `}` with no anchor after it (e.g. allow_backdrop's
+    # init.rs hunk — "Hunk #1 FAILED at 204", fails even at -F3), which git apply
+    # and surfer apply cleanly. git apply also requires exact context, so a
+    # Firefox-base drift surfaces as a clean failure rather than a silent fuzz.
+    # Skip the two external webrender backports that already landed upstream in
+    # Firefox ${firefox-version} (their code is present in the pristine source, so
+    # re-applying fails as "already applied"). Re-check this skip list whenever the
+    # pinned Firefox version changes.
     rsync -r --chmod=u+w --exclude "*.patch" "${zen-src}/src/" .
 
     find "${zen-src}/src" -type f -name "*.patch" \
       ! -name "bug_2013682_allow_stacking_contexts_to_be_promoted.patch" \
       ! -name "gh-12979_clip_dirty_rect_to_device_size.patch" \
       | sort | while read -r patch_name; do
-      patch -p1 --no-backup-if-mismatch < "$patch_name"
+      git apply -p1 "$patch_name"
     done
 
     # Locales: en-US plus every supported language (mapped through language-maps).
