@@ -42,7 +42,7 @@ let
 
   firefox-src = fetchurl {
     url = "mirror://mozilla/firefox/releases/${firefox-version}/source/firefox-${firefox-version}.source.tar.xz";
-    hash = "sha512-DFZiq6j7iXkCr5Xbsv2YixltnPmui5h66J4KZJKsdTuNS4u3sydJCcLrIAqwmN81biPNYIRVZGf1XmkScxfzmg==";
+    hash = "sha512-bPLcfyimo0MPKGbfTKNQY8ut8jTIKjT6ZR4C2QnldB5QzZhv7xvZfUhrUSRMtjmysQNRRog0e/f5T9FtJkzE8g==";
   };
 
   # Read from surfer.json so the fetched Firefox source always matches the base
