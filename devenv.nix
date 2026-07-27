@@ -1,5 +1,9 @@
-{ pkgs, ... }:
+{ pkgs, inputs, ... }:
 let
+  # Firefox 153's build checks `cbindgen --version` and refuses anything below
+  # 0.29.4, which the pinned nixpkgs predates. Take just this tool from a newer
+  # nixpkgs (see devenv.yaml) rather than moving the whole toolchain.
+  cbindgen = inputs.nixpkgs-cbindgen.legacyPackages.${pkgs.stdenv.system}.rust-cbindgen;
   # Loader path for the engine's libraries. firefox-unwrapped.buildInputs
   # carries -dev outputs whose /lib holds pkg-config data but not the runtime
   # .so files, so pull each input's `out` and `lib` outputs (the .so may live
@@ -51,7 +55,7 @@ in
     # nasm assembles bundled media codecs (lives in Firefox's nativeBuildInputs).
     pkgs.nasm
     # cbindgen generates C/C++ headers from Rust (style system, webrender).
-    pkgs.rust-cbindgen
+    cbindgen
     # patchelf embeds RUNPATH into mochitest helper binaries (see enterShell).
     pkgs.patchelf
   ]
