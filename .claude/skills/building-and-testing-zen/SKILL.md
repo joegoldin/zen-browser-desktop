@@ -64,8 +64,26 @@ Manual one-off: `patchelf --add-rpath "$ORIGIN:<gcc-lib>/lib" <objdir>/dist/bin/
 | Full build (once) | `cd engine && ./mach build` | Long. Produces `dist/bin/libxul.so` + `dist/bin/zen`. |
 | Front-end only | `cd engine && ./mach build faster` | ~20s. Use after editing src/zen, Zen browser content, **tests**, prefs, ZenPreloadedScripts. |
 
+**Export `MOZCONFIG` when you call `mach` directly.** `surfer build` sets it for
+you; `./mach build` does not, and there is no `engine/mozconfig` to fall back on,
+so configure silently runs without the devenv gating in
+`configs/linux/mozconfig` and dies with `Could not find libclang ...` (the
+`--with-libclang-path` line never ran). Always:
+
+```bash
+devenv shell -- bash -c 'cd engine && MOZCONFIG=$DEVENV_ROOT/configs/linux/mozconfig ./mach build'
+```
+
 `mach build faster` **requires a prior full build** — if it errors
 `No rule to make target 'libxul.so'`, run the full `mach build` first.
+
+### Re-basing onto a new Firefox version
+
+`surfer download` + `npm run import` re-fetch and re-patch from scratch (this is
+the one time re-importing is correct — see the src↔engine section). Bumping the
+base can also outgrow the pinned toolchain: Firefox 153 requires
+**cbindgen >= 0.29.4**, and configure fails with `cbindgen version ... is too
+old` until `devenv.nix` supplies it.
 
 ## en-US locale (critical, easy to miss)
 
