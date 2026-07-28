@@ -463,13 +463,16 @@ tarball the deb, rpm and AUR package are all cut from."
 gh workflow run fork-linux-release.yml --repo joegoldin/zen-browser-desktop -f version=1.21.9b-tst.1
 ```
 
-This is the step most likely to fail first. Three known hazards, in order of likelihood:
+This is the step most likely to fail first. Two known hazards, in order of likelihood:
 
-1. **`release-build.sh` runs `bash ./scripts/mar_sign.sh -i`**, which sets up MAR signing. If it fails without signing keys, the build stops there and the script needs that line guarded for the fork.
-2. **The 6 h job limit.** A Firefox build without PGO should fit, but not by a wide margin.
-3. **Disk**, even after the free-disk-space action.
+1. **The 6 h job limit.** A Firefox build without PGO should fit, but not by a wide margin.
+2. **Disk**, even after the free-disk-space action.
 
-If any of these bite, the fallback is a self-hosted runner on erdtree, which removes the time and disk constraints together. Do not proceed to Task 5 until a tarball exists.
+If either bites, the fallback is a self-hosted runner on erdtree, which removes the time and disk constraints together.
+
+A third hazard was listed here and is now ruled out. `release-build.sh` runs `bash ./scripts/mar_sign.sh -i` unconditionally under `set -xe`, and `import_cert()` exits 1 when `build/signing/public_key.der` is missing, so the concern was that every build would die at that line without signing keys. It does not: `build/signing/public_key.der` is committed to the repo, and the five updater `.der` files `import_cert` overwrites arrive with the Firefox source. Running `-i` against both, in a temp tree, exits 0 and replaces the updater certs as intended. No guard is needed.
+
+Task 5 can be written before a tarball exists, but it cannot be verified without one: its layout assumptions stay unproven until this step has run.
 
 ### Task 5: deb and rpm from the tarball
 

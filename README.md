@@ -6,23 +6,25 @@
 <!-- TODO: Get a job -->
 <img src="./docs/assets/zen-dark.svg" width="100px" align="left">
 
-### `Zen Browser`
+### `Zen Browser` with tree-style tabs
 
-[![Downloads](https://img.shields.io/github/downloads/zen-browser/desktop/total.svg)](https://github.com/zen-browser/desktop/releases)
 [![Crowdin](https://badges.crowdin.net/zen-browser/localized.svg)](https://crowdin.com/project/zen-browser)
-[![Zen Release builds](https://github.com/zen-browser/desktop/actions/workflows/build.yml/badge.svg?branch=stable)](https://github.com/zen-browser/desktop/actions/workflows/build.yml)
+
+Tree-style tabs built into the browser rather than layered on with userChrome
+CSS or an extension. Tabs nest under a parent, collapse, and keep their shape
+across a restart. Everything else is stock Zen, tracking upstream `dev`.
 
 ---
 
 > ### Unofficial fork
 >
-> This is a fork of [zen-browser/desktop](https://github.com/zen-browser/desktop)
-> that adds native tree-style tabs, which upstream
-> [declined](https://github.com/zen-browser/desktop/pull/14746). It is not
-> affiliated with or endorsed by the Zen team.
+> A fork of [zen-browser/desktop](https://github.com/zen-browser/desktop).
+> Upstream [declined](https://github.com/zen-browser/desktop/pull/14746) the
+> tree-style tabs work, so it lives here instead. Not affiliated with or
+> endorsed by the Zen team.
 >
 > It keeps upstream's application id and binary name, so it is a drop-in
-> replacement and **shares the same profile directory as stock Zen**. Two
+> replacement and shares the same profile directory as stock Zen. Two
 > consequences:
 >
 > - You cannot install both from a package manager; they own the same paths.
