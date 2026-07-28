@@ -150,7 +150,7 @@ for fork-only fixes between upstream releases."
 The workflow that used to do this reset `dev` to upstream and replayed one commit on top. That design would now destroy the fork. The replacement only ever merges, never pushes to `dev`, and stops for a human exactly when the patch files conflict.
 
 **Files:**
-- Create: `.github/workflows/sync-upstream.yml`
+- Create: `.github/workflows/merge-upstream-zen.yml`
 
 **Interfaces:**
 - Consumes: `upstream/dev` from `zen-browser/desktop`
@@ -161,6 +161,11 @@ The workflow that used to do this reset `dev` to upstream and replayed one commi
 ```yaml
 # Merges upstream Zen into this fork's dev.
 #
+# Named merge-upstream-zen, NOT sync-upstream: upstream already ships a
+# sync-upstream.yml that pulls new Firefox point releases into Zen, and
+# check-candidate-release.yml calls it as a reusable workflow. Overwriting it
+# breaks that caller.
+#
 # This NEVER pushes to dev and NEVER resets it. The job it replaces reset dev
 # to upstream and replayed a single commit on top, which was correct when dev
 # was a mirror and would now delete the entire fork. Everything lands on a
@@ -169,7 +174,7 @@ The workflow that used to do this reset `dev` to upstream and replayed one commi
 # A conflict here is expected on Firefox version bumps and is concentrated in
 # four .patch files plus surfer.json. See
 # docs/plans/2026-07-28-fork-maintenance-design.md for the resolution procedure.
-name: Sync upstream
+name: Merge upstream Zen
 
 on:
   schedule:
@@ -241,10 +246,10 @@ jobs:
 
 ```bash
 cd /home/joe/Development/zen-browser-desktop/zen-wt/nightly
-python3 -c "import yaml; yaml.safe_load(open('.github/workflows/sync-upstream.yml')); print('YAML OK')"
+python3 -c "import yaml; yaml.safe_load(open('.github/workflows/merge-upstream-zen.yml')); print('YAML OK')"
 python3 -c "
 import yaml
-d = yaml.safe_load(open('.github/workflows/sync-upstream.yml'))
+d = yaml.safe_load(open('.github/workflows/merge-upstream-zen.yml'))
 print(d['jobs']['merge-upstream']['steps'][1]['run'])" | bash -n && echo "BASH OK"
 ```
 
@@ -253,7 +258,7 @@ Expected: `YAML OK` then `BASH OK`.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add .github/workflows/sync-upstream.yml
+git add .github/workflows/merge-upstream-zen.yml
 git commit -m "ci: merge-only upstream sync
 
 Replaces the deleted nightly-integration job, which reset dev to upstream and
@@ -265,9 +270,9 @@ PR either way so a conflicting Firefox bump stops for a human."
 - [ ] **Step 4: Dry-run it**
 
 ```bash
-gh workflow run sync-upstream.yml --repo joegoldin/zen-browser-desktop
+gh workflow run merge-upstream-zen.yml --repo joegoldin/zen-browser-desktop
 sleep 60
-gh run list --repo joegoldin/zen-browser-desktop --workflow=sync-upstream.yml --limit 1
+gh run list --repo joegoldin/zen-browser-desktop --workflow=merge-upstream-zen.yml --limit 1
 ```
 
 Expected: success, and either no PR (dev already current) or a PR titled `Upstream sync (sync/upstream-<date>)`. Verify `dev` did not move:
@@ -437,7 +442,7 @@ cd /home/joe/Development/zen-browser-desktop/zen-wt/nightly
 python3 -c "import yaml; d=yaml.safe_load(open('.github/workflows/fork-linux-release.yml')); print('steps:', len(d['jobs']['build']['steps']))"
 ```
 
-Expected: `steps: 14`
+Expected: `steps: 16`
 
 - [ ] **Step 4: Commit**
 
@@ -773,7 +778,7 @@ Expected: lint clean, tab-tree 142/0, window_sync 28/0, space_routing 23283/0.
 End-to-end, the pipeline is working when:
 
 1. A push to `dev` produces one garnix build and a cached closure, and `nix build` on another machine downloads rather than compiles.
-2. `gh workflow run sync-upstream.yml` leaves `dev` untouched and opens a PR.
+2. `gh workflow run merge-upstream-zen.yml` leaves `dev` untouched and opens a PR.
 3. `gh workflow run fork-linux-release.yml -f version=1.21.9b-tst.1` publishes a release with a tarball, a deb and an rpm.
 4. The deb installs in a Debian container and `/opt/zen-tst/zen --version` runs.
 

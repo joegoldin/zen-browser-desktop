@@ -1,0 +1,134 @@
+# Linux release build for the fork.
+#
+# Adapted from upstream's linux-release-build.yml. Do not diff the two
+# expecting a near-match; this is a deliberate reduction:
+#
+#   - workflow_dispatch rather than workflow_call, so it can be triggered
+#   - stock ubuntu-latest rather than blacksmith/self-hosted
+#   - no aarch64 leg
+#   - ZEN_GA_DISABLE_PGO, skipping the two-stage PGO build (a profile
+#     generation run under Xvfb, roughly double the build time)
+#   - adds a Publish release step upstream has no equivalent of
+#
+# and it drops several things upstream needs that this fork does not: the
+# sccache/actions-cache steps, Setup Git, the DEPLOY_KEY checkout token (no
+# submodules here), the SURFER_CERT_PATCH_ISSUER/_NAME secrets (Windows NSIS
+# strings only), the three ZEN_*_API_KEY secrets, continue-on-error on Build,
+# and the MOZ_BUILD_DATE input. Every one of those is optional at the point
+# it is consumed — the build proceeds without them; the shipped browser just
+# carries no embedded API keys.
+#
+# The tarball this produces is the base for the deb, the rpm and the AUR
+# package. It is deliberately NOT the Nix build: a Nix build hard-codes
+# /nix/store into the ELF interpreter and RPATH, so it cannot be repackaged
+# for a machine without a Nix store.
+name: Fork Linux release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Fork version, e.g. 1.21.9b-tst.1"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-pip dos2unix yasm nasm build-essential \
+            libgtk2.0-dev libpython3-dev m4 uuid libasound2-dev libcurl4-openssl-dev \
+            libdbus-1-dev libdrm-dev libdbus-glib-1-dev libgtk-3-dev libpulse-dev \
+            libx11-xcb-dev libxt-dev xvfb lld llvm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Surfer CI setup
+        run: npm run surfer -- ci --brand release --display-version ${{ inputs.version }}
+
+      - name: Download Firefox source
+        run: npm run download
+
+      - name: Pin Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+            --default-toolchain $(cat .rust-toolchain)
+          . "$HOME/.cargo/env"
+          rustup target add x86_64-unknown-linux-gnu
+
+      - name: Import the Zen patchset
+        env:
+          SURFER_COMPAT: x86_64
+        run: |
+          . "$HOME/.cargo/env"
+          npm run import
+
+      - name: Build language packs
+        run: sh scripts/download-language-packs.sh
+
+      - name: Bootstrap
+        run: |
+          cd engine
+          export SURFER_PLATFORM="linux"
+          ./mach --no-interactive bootstrap --application-choice browser
+          cd ..
+
+      - name: Build
+        env:
+          SURFER_COMPAT: x86_64
+          ZEN_RELEASE_BRANCH: release
+          ZEN_GA_DISABLE_PGO: 1
+        run: |
+          export SURFER_PLATFORM="linux"
+          bash .github/workflows/src/release-build.sh
+
+      - name: Package
+        env:
+          SURFER_COMPAT: x86_64
+          ZEN_GA_DISABLE_PGO: true
+        run: |
+          export SURFER_PLATFORM="linux"
+          export ZEN_RELEASE=1
+          npm run package
+
+      - name: Rename artifact
+        run: mv dist/zen-*.tar.xz "zen.linux-x86_64.tar.xz"
+
+      - name: Upload tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: zen.linux-x86_64.tar.xz
+          path: ./zen.linux-x86_64.tar.xz
+          retention-days: 7
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          gh release create "$VERSION" \
+            --title "$VERSION" \
+            --notes "Zen with native tree-style tabs. Unofficial fork of zen-browser/desktop." \
+            ./zen.linux-x86_64.tar.xz
