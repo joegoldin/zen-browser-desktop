@@ -170,26 +170,30 @@ re-run a slow command). Register a new dir's `browser.toml` in
 ## Lint
 
 ```bash
-devenv shell -- bash -c 'cd engine && env -u LD_LIBRARY_PATH ./mach lint -l eslint -l stylelint zen'
+devenv shell -- bash -c 'npm run lint'      # = ./mach lint zen
 ```
 
-Two things make the plain `npm run lint` (= `./mach lint zen`) fail in the
-devenv, both environmental rather than lint findings:
+This needs nothing special now, but two things in `devenv.nix` are load-bearing
+for it and are worth knowing if lint suddenly stops working:
 
-- **`uv: undefined symbol: _rjem_malloc`** (exit 127) while mach builds its lint
-  virtualenv. devenv puts Firefox's jemalloc on `LD_LIBRARY_PATH` and the system
-  `uv` picks it up. Drop the variable for the lint run; lint needs none of those
-  libraries.
-- **`ModuleNotFoundError: No module named 'zstandard'`** — the full `zen` lint
-  set pulls toolchain artifacts (clang-format, rustfmt) it then can't unpack.
-  Restrict to `-l eslint -l stylelint`, which is what covers the Zen JS/CSS.
+- **jemalloc is filtered out of `LD_LIBRARY_PATH`.** Firefox allocates through
+  its own bundled mozjemalloc and nothing in `dist/bin` links nixpkgs' jemalloc,
+  but while it was on the path any dynamically linked tool that resolved malloc
+  through it broke. `uv`, which mach shells out to for its virtualenvs, died
+  with `uv: undefined symbol: _rjem_malloc` and took `mach lint` down before it
+  reached a linter.
+- **`zstandard` is in the devenv python.** It is a `pypi-optional` entry in
+  `python/sites/mach.txt`, so mach runs fine until it has to unpack a
+  `.tar.zst`, which `mach lint` does when fetching the clang-format/clang-tidy
+  toolchains. Mach puts the invoking interpreter's site-packages on its path, so
+  installing it there is enough.
 
 `engine/zen` is a tree of symlinks into `src/zen` made at import time, so after
 switching branches it can hold dangling links (files the branch doesn't have,
 which make eslint fail with ENOENT) and be missing links for files the branch
-added (which then go unlinted). Re-sync before trusting a run: delete broken
-links with `find engine/zen -xtype l -delete`, then symlink any `src/zen` file
-that has none.
+added (which then go unlinted, silently). Re-sync before trusting a run: delete
+broken links with `find engine/zen -xtype l -delete`, then symlink any `src/zen`
+file that has none.
 
 ## Quick fault table
 

@@ -4,6 +4,17 @@ let
   # 0.29.4, which the pinned nixpkgs predates. Take just this tool from a newer
   # nixpkgs (see devenv.yaml) rather than moving the whole toolchain.
   cbindgen = inputs.nixpkgs-cbindgen.legacyPackages.${pkgs.stdenv.system}.rust-cbindgen;
+  # Firefox allocates through its own bundled mozjemalloc, and nothing under
+  # dist/bin links nixpkgs' jemalloc (`ldd dist/bin/firefox | grep jemalloc` is
+  # empty) — it is a build-time input only. Left on LD_LIBRARY_PATH it gets
+  # picked up by unrelated dynamically linked tools and breaks them, because
+  # Firefox's copy exports its symbols under an `_rjem_` prefix. `uv` is the one
+  # that bites: mach shells out to it to build its virtualenvs, and it dies with
+  # `uv: undefined symbol: _rjem_malloc`, which takes out `mach lint` before it
+  # reaches a linter. Keep it out of the runtime path.
+  isJemalloc = p: pkgs.lib.hasPrefix "jemalloc" (p.pname or p.name or "");
+  runtimeEngineInputs =
+    builtins.filter (p: !(isJemalloc p)) pkgs.firefox-unwrapped.buildInputs;
   # Loader path for the engine's libraries. firefox-unwrapped.buildInputs
   # carries -dev outputs whose /lib holds pkg-config data but not the runtime
   # .so files, so pull each input's `out` and `lib` outputs (the .so may live
@@ -12,7 +23,7 @@ let
     pkgs.lib.concatMap (p: [
       (p.out or p)
       (p.lib or p)
-    ]) pkgs.firefox-unwrapped.buildInputs
+    ]) runtimeEngineInputs
     ++ (with pkgs; [
       # GTK/Cairo/X stack Firefox links directly but that reaches the build
       # only transitively (via gtk3), so it's absent from buildInputs; each
@@ -39,7 +50,13 @@ in
   packages = [
     pkgs.git
     pkgs.nodejs_22
-    pkgs.python311
+    # zstandard is a `pypi-optional` entry in python/sites/mach.txt, so mach
+    # runs without it right up until something has to unpack a .tar.zst — which
+    # `mach lint` does when it fetches the clang-format/rustfmt toolchains, and
+    # then dies on `ModuleNotFoundError: No module named 'zstandard'`. Mach's
+    # site puts the invoking interpreter's site-packages on its path, so
+    # supplying it here is enough.
+    (pkgs.python311.withPackages (ps: [ ps.zstandard ]))
     pkgs.cargo
     pkgs.rustc
     pkgs.pkg-config
