@@ -120,6 +120,19 @@
                 # has to be supplied explicitly or mach silently falls back to
                 # the slower, less-exercised plain-pip path.
                 uv
+                # mozlint's ruff and ruff-format linters shell out to a bare
+                # `ruff`, which mach normally supplies from the virtualenv it
+                # builds out of python/sites/lint.txt. That virtualenv does not
+                # get populated on a runner that starts from an empty $HOME, so
+                # the linters die on FileNotFoundError before looking at
+                # anything. src/zen has two Python files, so they do have work
+                # to do and skipping them is not an option.
+                #
+                # nixpkgs is a patch release behind the pin in lint.txt
+                # (0.15.14 against 0.15.15), so CI and a local devenv run can in
+                # principle disagree. Worth checking here first if lint ever
+                # fails in one place and passes in the other.
+                ruff
                 cacert
               ];
               # devenv.nix filters nixpkgs' jemalloc out of the LD_LIBRARY_PATH
