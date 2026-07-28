@@ -1,0 +1,31 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# A JSON array of "managed" Space Routing rules, intended to be set by an
+# enterprise policy or a declarative configuration manager (e.g. a Nix /
+# home-manager dotfiles setup), the same way Containerise rules can be seeded.
+#
+# Managed routes are evaluated before — and take precedence over — the routes a
+# user creates in the Space Routing dialog, and they are never written back to
+# the on-disk store. Each entry looks like:
+#
+#   { "reference": "github.com", "matchType": "contains", "openInSpace": "Work" }
+#
+# `openInSpace` targets a Space by its name, which is resolved to the Space's id
+# at routing time. That indirection is what makes a declarative config
+# deterministic: Space ids are random per profile, but names are stable. Use
+# `openIn` instead to target a literal "most-recent-space" or a known Space id.
+- name: zen.space-routing.managed-routes
+  value: ""
+
+# A JSON array of "managed" Spaces, seeded the same way as managed-routes so a
+# declarative config can define the Spaces themselves (not just route to them).
+# Each entry: { "name": "Work", "icon": "briefcase", "container": "Work",
+# "position": 0 }. `icon` is an emoji, a built-in icon name / *.svg (expanded to
+# a chrome:// selectable-icon URL), or a full URL. `container` is resolved by
+# label to a userContextId (unknown -> none; containers are never created).
+# Managed Spaces are created if missing, synced if present, never deleted, and
+# read-only in the UI.
+- name: zen.space-routing.managed-spaces
+  value: ""
