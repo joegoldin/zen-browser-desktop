@@ -141,29 +141,6 @@ need. Two details in it are load-bearing: jemalloc is filtered off
 virtualenvs, and `zstandard` is added to the devenv python, because mach needs
 it to extract toolchain archives.
 
-### Build and cache
-
-Two pipelines that do not overlap.
-
-**garnix** builds the flake and uploads the closure to a self-hosted binary
-cache, so machines substitute Zen instead of compiling it. `garnix.yaml` names
-`packages.x86_64-linux.zen-browser-unwrapped` explicitly, which keeps CI off
-`aarch64-linux`. The only aarch64 builder registered against that instance is
-a two-core box, where a Firefox build would run for days. The flake still
-declares aarch64 so that platform can build locally.
-
-This repository is public and all of its flake inputs are public, so the
-closures garnix builds are served from the public cache. Adding it as a
-substituter means a `nix build` of this flake downloads Zen rather than
-compiling it, which is the difference between a minute and several hours.
-
-**GitHub Actions** produces the conventional artifacts.
-`fork-linux-release.yml` builds the x86_64 tarball and publishes a release,
-then packages the deb and rpm from that tarball with `fpm`. It is deliberately
-not cut from the Nix build: a Nix build hard-codes `/nix/store` into the ELF
-interpreter and RPATH, so a deb made from it will not start on a machine
-without a Nix store.
-
 ### Tracking upstream
 
 `merge-upstream-zen.yml` runs when you dispatch it. It merges `upstream/dev` on
