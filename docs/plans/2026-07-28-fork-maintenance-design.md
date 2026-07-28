@@ -116,7 +116,7 @@ Public repos serve artifacts anonymously and Caddy bypasses the Authentik gate f
 Three instance-side settings have to change before any of this works, none of them in this repo:
 
 - **Build timeout.** The per-repo default is 1 h. A Firefox build is several hours and will be killed mid-compile. Raise it on the Configure page for this repo. Note that `maxSilent = 14400` in `nix/package.nix` is Nix's silence timer, not garnix's wall clock; they are different limits.
-- **Builder placement.** farum-azula is 2 cores / 12 GiB with `maxJobs = 1`. A Firefox build dispatched there will take days or exhaust memory. This needs to land on erdtree.
+- **Keep the build scope to x86_64.** farum-azula is registered with `systems = [ "aarch64-linux" ]` and `maxJobs = 1` on a 2-core box shared with game servers, so an `x86_64-linux` build can never be dispatched there and needs no guarding. The flake does declare `aarch64-linux` though, and garnix's default scope (`*.x86_64-linux.*`) is the only thing keeping that unbuilt. Adding an aarch64 attribute to `garnix.yaml` would hand a Firefox build to that 2-core box. Build aarch64 only if erdtree is made to take it.
 - **Artifact retention.** The default is 30 days. An AUR package pointing at `latest.zip` breaks silently once the artifact is reaped, so release commits need the keep-latest exemption or a per-build lock.
 
 ### GitHub runners: macOS and Windows
