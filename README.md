@@ -12,6 +12,27 @@
 [![Crowdin](https://badges.crowdin.net/zen-browser/localized.svg)](https://crowdin.com/project/zen-browser)
 [![Zen Release builds](https://github.com/zen-browser/desktop/actions/workflows/build.yml/badge.svg?branch=stable)](https://github.com/zen-browser/desktop/actions/workflows/build.yml)
 
+---
+
+> ### Unofficial fork
+>
+> This is a fork of [zen-browser/desktop](https://github.com/zen-browser/desktop)
+> that adds native tree-style tabs, which upstream
+> [declined](https://github.com/zen-browser/desktop/pull/14746). It is not
+> affiliated with or endorsed by the Zen team.
+>
+> It keeps upstream's application id and binary name, so it is a drop-in
+> replacement and **shares the same profile directory as stock Zen**. Two
+> consequences:
+>
+> - You cannot install both from a package manager; they own the same paths.
+> - Opening the same profile in stock Zen works, but stock Zen ignores the
+>   `zen-tree-*` attributes this fork stores, so a round trip through it
+>   flattens the tab tree. Back up your profile before switching back and
+>   forth.
+
+---
+
 Zen is a firefox-based browser with the aim of pushing your productivity to a new level!
 
 <div flex="true">
