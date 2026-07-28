@@ -6,10 +6,9 @@
 # every merge from upstream reintroduces it. Deleting it again is the correct
 # resolution; keeping the names distinct is what stops that being a conflict.
 #
-# This NEVER pushes to dev and NEVER resets it. The job it replaces reset dev
-# to upstream and replayed a single commit on top, which was correct when dev
-# was a mirror and would now delete the entire fork. Everything lands on a
-# branch behind a PR.
+# This NEVER pushes to dev and NEVER resets it. dev carries the fork's own
+# commits, so anything that moves it non-additively destroys them. Everything
+# lands on a branch behind a PR.
 #
 # A conflict here is expected on Firefox version bumps and is concentrated in
 # four .patch files plus surfer.json. See

@@ -23,12 +23,10 @@ let
       extraPassthru = {
         inherit (zen-browser-src) ffprefs;
         inherit zen-browser-src;
-        # The directory under $out/lib the browser actually lives in. Anything
-        # that has to write inside the application directory, an autoconfig
-        # injector for instance, should read this rather than guess at a name:
-        # buildMozillaMach has already moved it once, from zen-<version> to
-        # zen, and the compatibility symlink below exists because a consumer
-        # guessed.
+        # The directory under $out/lib the browser lives in. Anything that has
+        # to write inside the application directory, an autoconfig injector for
+        # instance, should read this rather than guess at the name, which is
+        # not stable across nixpkgs revisions.
         libName = "zen";
       };
       packageVersion = zen-browser-src.zen-version;
@@ -72,8 +70,9 @@ base.overrideAttrs (old: {
   # at the real directory rather than renaming that directory, which the
   # launcher, the desktop entry and wrapFirefox all resolve against.
   #
-  # Discovered rather than hardcoded because buildMozillaMach has changed it
-  # before: 1.20.1b installed to lib/zen-1.20.1b and 1.20.2b to lib/zen.
+  # The real directory is discovered rather than named, because what
+  # buildMozillaMach calls it varies with the nixpkgs it comes from: both
+  # lib/zen and lib/zen-<version> occur.
   postInstall = (old.postInstall or "") + ''
     appdir=$(find "$out/lib" -mindepth 1 -maxdepth 1 -type d \
       -exec test -e '{}/zen' \; -print -quit)

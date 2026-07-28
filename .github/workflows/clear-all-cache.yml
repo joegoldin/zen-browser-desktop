@@ -5,8 +5,7 @@ on:
 jobs:
   cleanup:
     runs-on: ubuntu-latest
-    # Deleting a cache entry needs actions:write and nothing else. This was
-    # write-all, which handed a cache-clearing job the ability to push code.
+    # Deleting a cache entry needs actions:write and nothing else.
     permissions:
       actions: write
     steps:
