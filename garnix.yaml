@@ -13,3 +13,24 @@
 builds:
   include:
     - "packages.x86_64-linux.zen-browser-unwrapped"
+
+# `npm run lint` (mach lint zen) runs here rather than on GitHub, on the same
+# instance that already builds the browser. This backend's action schema has
+# only an "on: push" trigger and no branch filter, so every push to every
+# branch is linted.
+#
+# Nothing is cached between runs: a garnix action gets a fresh environment, so
+# each push re-downloads the Firefox source tarball (~767 MiB) and re-imports
+# the patchset. The build path avoids this by going through a fetchurl FOD that
+# nix caches; routing lint's download the same way would too.
+#
+# No githubToken, because nothing in the chain needs one. The Firefox source
+# comes from archive.mozilla.org, surfer's patch import is entirely local, and
+# mach's clang-format toolchain comes from Mozilla's tooltool. The single
+# GitHub fetch is one transitive npm dependency of @zen-browser/surfer
+# (is-apple-silicon), one anonymous request per run, far below the rate limit
+# that flag exists to lift.
+actions:
+  - "on": push
+    run: lint
+    withRepoContents: true
