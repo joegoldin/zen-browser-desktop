@@ -39,6 +39,19 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # First, before anything expensive. The version is baked into the binary
+      # by the surfer step and becomes a public tag four hours later, so a bad
+      # one has to fail here rather than at packaging time.
+      - name: Check the version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9][^-]*-tst\.[0-9]+$'; then
+            echo "VERSION must look like 1.21.9b-tst.1, got: $VERSION" >&2
+            exit 1
+          fi
+
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -128,7 +141,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ inputs.version }}
         run: |
+          # --target pins the tag to the commit that was actually built.
+          # Without it the tag lands on the default branch's head, so a
+          # dispatch from any other ref ships a binary that does not match the
+          # source the tag names, which is what the AUR package builds from.
           gh release create "$VERSION" \
+            --target "$GITHUB_SHA" \
             --title "$VERSION" \
             --notes "Zen with native tree-style tabs. Unofficial fork of zen-browser/desktop." \
             ./zen.linux-x86_64.tar.xz
@@ -169,7 +187,7 @@ jobs:
           # Both halves of the split below are meaningless unless VERSION has
           # the documented shape. Without this check a bare "1.21.9b" splits
           # into version=1.21.9b iteration=1.21.9b and builds happily.
-          if ! printf '%s' "$VERSION" | grep -qE '^[^-]+-tst\.[0-9]+$'; then
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9][^-]*-tst\.[0-9]+$'; then
             echo "VERSION must look like 1.21.9b-tst.1, got: $VERSION" >&2
             exit 1
           fi

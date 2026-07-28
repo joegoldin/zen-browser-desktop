@@ -69,7 +69,11 @@ jobs:
             echo "empty=true" >> "$GITHUB_OUTPUT"
           else
             echo "empty=false" >> "$GITHUB_OUTPUT"
-            git push origin "$branch"
+            # The branch name is the date, so a re-run on the same day rebuilds
+            # the same branch with a new merge-commit timestamp and a plain
+            # push is rejected non-fast-forward. The lease keeps this from
+            # clobbering anything that moved underneath us.
+            git push --force-with-lease origin "$branch"
           fi
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
@@ -87,4 +91,10 @@ jobs:
             title="Upstream sync ($BRANCH)"
             body=$'Merged cleanly. A clean textual merge of a .patch file can still produce a patch that no longer applies, so run the regression gate before merging:\n\n```\ndevenv shell -- bash -c "npm run lint"\ndevenv shell -- bash -c "npm test -- tab-tree --headless"\ndevenv shell -- bash -c "npm test -- window_sync --headless"\ndevenv shell -- bash -c "npm test -- space_routing --headless"\n```'
           fi
-          gh pr create --base dev --head "$BRANCH" --title "$title" --body "$body"
+          # A re-run after a failure reuses the same branch, so a PR may already
+          # be open against it. Updating it is right; failing is not.
+          if gh pr view "$BRANCH" --json number >/dev/null 2>&1; then
+            gh pr edit "$BRANCH" --title "$title" --body "$body"
+          else
+            gh pr create --base dev --head "$BRANCH" --title "$title" --body "$body"
+          fi
