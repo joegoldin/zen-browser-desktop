@@ -86,12 +86,51 @@ Note that `engine/zen` is a tree of symlinks into `src/zen` created at import ti
 
 ## Distribution
 
-Ordered by cost, and deliberately phased. Linux and Nix are cheap to keep running; macOS and Windows are where fork maintenance usually dies, because the output cannot be tested locally and each Firefox bump can break them independently.
+Two pipelines, split by what each is actually good at. The self-hosted garnix instance on erdtree handles everything Nix-shaped; GitHub's runners handle the platforms with no local hardware.
 
-1. **Nix flake**: works today, needs no CI, consumers build from a git ref.
-2. **Linux x86_64**: adapt the inherited `linux-release-build.yml`, publish tarballs as GitHub Releases.
-3. **AUR**: a `-bin` package consuming the Linux release tarball. Depends on step 2 and on the `conflicts`/`provides` fields above.
-4. **macOS and Windows**: after the patchset has survived at least one Firefox bump.
+### garnix: Linux, the binary cache, and AUR artifacts
+
+The repo has no `garnix.yaml` yet, so it currently runs on garnix defaults and builds whatever matches `*.x86_64-linux.*` plus the devShell. It wants scoping:
+
+```yaml
+builds:
+  include:
+    - "packages.x86_64-linux.zen-browser-unwrapped"
+    - "packages.x86_64-linux.zen-linux-tarball"
+
+artifacts:
+  - package: zen-linux-tarball
+    name: zen-linux-x86_64
+```
+
+The binary cache is the biggest single win and the reason to prefer garnix over Actions here: every machine in the fleet already substitutes from it, so a push builds Zen once on erdtree and every other machine downloads the closure instead of spending hours compiling. A GitHub Actions tarball cannot do that; it would still leave `nix build` recompiling locally.
+
+`zen-browser-unwrapped` is a Nix store path, not a release tarball, so AUR needs a second small derivation (`zen-linux-tarball`) that repackages it into upstream's layout. Declaring that in `artifacts:` publishes it at a stable URL:
+
+```
+https://<garnixDomain>/api/artifacts/joegoldin/zen-browser-desktop/dev/zen-linux-x86_64/latest.zip
+```
+
+Public repos serve artifacts anonymously and Caddy bypasses the Authentik gate for `/api/artifacts/*`, so a PKGBUILD can fetch it without credentials. That removes GitHub Releases from the critical path entirely.
+
+Three instance-side settings have to change before any of this works, none of them in this repo:
+
+- **Build timeout.** The per-repo default is 1 h. A Firefox build is several hours and will be killed mid-compile. Raise it on the Configure page for this repo. Note that `maxSilent = 14400` in `nix/package.nix` is Nix's silence timer, not garnix's wall clock; they are different limits.
+- **Builder placement.** farum-azula is 2 cores / 12 GiB with `maxJobs = 1`. A Firefox build dispatched there will take days or exhaust memory. This needs to land on erdtree.
+- **Artifact retention.** The default is 30 days. An AUR package pointing at `latest.zip` breaks silently once the artifact is reaped, so release commits need the keep-latest exemption or a per-build lock.
+
+### GitHub runners: macOS and Windows
+
+Upstream's `macos-universal-release-build.yml` and `windows-release-build.yml` are inherited and run on GitHub-hosted runners. That is the right tool for both. `torrent` is Apple Silicon only, so a garnix darwin builder would not produce the universal build upstream's workflow does, and Windows cannot go through Nix at all.
+
+The Windows constraint is worth recording accurately, because "Nix can't build Windows" is not quite true. Nix has no native Windows target, but nixpkgs can cross-compile via `pkgsCross.mingwW64`, and Mozilla itself cross-builds Windows Firefox from Linux using `clang-cl`. The actual blocker is that Firefox's Windows build needs the Microsoft Windows SDK, which is not freely redistributable, so nixpkgs has no Windows Firefox and `buildMozillaMach` does not support it. Mozilla solves this by fetching SDK toolchain artifacts from their own taskcluster. Reproducing that inside a Nix sandbox is a project in its own right with a licensing question at the centre of it.
+
+### Order of work
+
+1. `garnix.yaml` scoping builds to the two packages, plus the instance-side timeout and builder settings. Ends the local rebuilds.
+2. `zen-linux-tarball` derivation and the `artifacts:` entry. Unblocks AUR.
+3. AUR `-bin` PKGBUILD sourcing the artifact URL, with the `conflicts`/`provides` fields above.
+4. macOS and Windows workflows, once the patchset has survived a Firefox bump.
 
 ## Known-good state at time of writing
 
