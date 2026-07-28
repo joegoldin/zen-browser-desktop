@@ -1,0 +1,15 @@
+# The self-hosted garnix instance builds this flake and uploads the closure to
+# its binary cache, so every machine in the fleet downloads Zen instead of
+# spending hours compiling it. That cache is the entire reason this repo is on
+# garnix; conventional artifacts (tarball, deb, rpm, macOS, Windows) come from
+# GitHub Actions instead, because a Nix build hard-codes /nix/store paths into
+# the ELF interpreter and RPATH and will not run on a machine without a Nix
+# store.
+#
+# x86_64 only, deliberately. The only registered aarch64 builder is a two-core
+# box running maxJobs = 1 that is shared with game servers, so a Firefox build
+# dispatched there would grind for days. The flake still declares
+# aarch64-linux so that platform can build locally; CI stays away from it.
+builds:
+  include:
+    - "packages.x86_64-linux.zen-browser-unwrapped"
