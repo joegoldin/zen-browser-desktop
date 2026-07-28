@@ -1,0 +1,8 @@
+inputs:
+  nixpkgs:
+    url: github:cachix/devenv-nixpkgs/rolling
+  # Firefox 153 requires cbindgen >= 0.29.4; the rolling pin above still has
+  # 0.29.2. Pinned to the nixpkgs commit that first shipped 0.29.4 so only this
+  # one tool moves, not the whole toolchain.
+  nixpkgs-cbindgen:
+    url: github:NixOS/nixpkgs/7525d999cd850b9a488817abc89c75dc733acf17
