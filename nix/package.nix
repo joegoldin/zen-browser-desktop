@@ -23,6 +23,13 @@ let
       extraPassthru = {
         inherit (zen-browser-src) ffprefs;
         inherit zen-browser-src;
+        # The directory under $out/lib the browser actually lives in. Anything
+        # that has to write inside the application directory, an autoconfig
+        # injector for instance, should read this rather than guess at a name:
+        # buildMozillaMach has already moved it once, from zen-<version> to
+        # zen, and the compatibility symlink below exists because a consumer
+        # guessed.
+        libName = "zen";
       };
       packageVersion = zen-browser-src.zen-version;
       requireSigning = false;
@@ -57,4 +64,24 @@ base.overrideAttrs (old: {
   configureFlags = map (
     f: if f == "--enable-lto=cross,full" then "--enable-lto=cross,thin" else f
   ) old.configureFlags;
+
+  # zen-browser-flake's home-manager module installs the Sine bootloader by
+  # globbing $out/lib/zen-bin-*, which is how its own repacked release tarball
+  # is laid out. A mach build is not, so without this the glob matches nothing
+  # and enabling sine silently does nothing at all. Point the name it looks for
+  # at the real directory rather than renaming that directory, which the
+  # launcher, the desktop entry and wrapFirefox all resolve against.
+  #
+  # Discovered rather than hardcoded because buildMozillaMach has changed it
+  # before: 1.20.1b installed to lib/zen-1.20.1b and 1.20.2b to lib/zen.
+  postInstall = (old.postInstall or "") + ''
+    appdir=$(find "$out/lib" -mindepth 1 -maxdepth 1 -type d \
+      -exec test -e '{}/zen' \; -print -quit)
+    if [ -n "$appdir" ]; then
+      ln -sn "$(basename "$appdir")" "$out/lib/zen-bin-${zen-browser-src.zen-version}"
+    else
+      echo "no application directory under $out/lib; the sine shim is stale" >&2
+      exit 1
+    fi
+  '';
 })

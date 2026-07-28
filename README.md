@@ -124,9 +124,12 @@ so it will drive this fork's source build instead:
 }
 ```
 
-Its sine-mods support is the one part that will not work this way: it writes
-into `lib/zen-bin-*`, which is the layout of a repacked release tarball rather
-than of a `mach` build, so enabling it silently does nothing here.
+All of that module works against this package, sine mods included. Sine needed
+help: it installs its bootloader by globbing `lib/zen-bin-*`, which is how that
+flake's repacked tarball is laid out and not how a `mach` build is, so
+`nix/package.nix` links that name to the real application directory. It finds
+that directory rather than assuming it, because `buildMozillaMach` has renamed
+it before.
 
 `nix/zen-browser.nix` reads the Firefox version out of `surfer.json` so the
 fetched source always matches the base the patches target. The source hash next
