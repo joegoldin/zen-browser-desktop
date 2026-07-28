@@ -79,17 +79,54 @@ fork build on top of upstream's `1.21.9b`.
 ### Nix
 
 The flake builds Zen from source with `buildMozillaMach`, patching a pristine
-Firefox tarball with this fork's patchset. Nothing prebuilt is fetched:
+Firefox tarball with this fork's patchset. Nothing prebuilt is fetched, so the
+binary you run is one you compiled from a source tree you can read.
+
+```bash
+nix build github:joegoldin/zen-browser-desktop#zen-browser-unwrapped
+```
+
+`zen-browser-unwrapped` is an unwrapped Firefox-style derivation, which is the
+shape every Firefox wrapper in nixpkgs and home-manager expects. Wrap it
+yourself if all you want is the browser:
 
 ```nix
 {
   inputs.zen-src.url = "github:joegoldin/zen-browser-desktop/dev";
 }
+
+# then, in a module:
+home.packages = [ (pkgs.wrapFirefox inputs.zen-src.packages.${pkgs.system}.zen-browser-unwrapped { }) ];
 ```
 
-```bash
-nix build github:joegoldin/zen-browser-desktop#zen-browser-unwrapped
+#### With home-manager
+
+[`0xc000022070/zen-browser-flake`](https://github.com/0xc000022070/zen-browser-flake)
+has a home-manager module covering the parts of Zen that plain `programs.firefox`
+knows nothing about: Spaces, pinned tabs, space routing, keyboard shortcuts,
+mods and theme presets. It normally installs Zen's official prebuilt binary,
+but its `unwrappedPackage` option takes any unwrapped Firefox-style derivation,
+so it will drive this fork's source build instead:
+
+```nix
+{
+  imports = [ inputs.zen-browser-flake.homeModules.default ];
+
+  programs.zen-browser = {
+    enable = true;
+    # The browser you compiled, rather than the prebuilt tarball the flake
+    # would otherwise fetch from upstream's releases.
+    unwrappedPackage = inputs.zen-src.packages.${pkgs.system}.zen-browser-unwrapped;
+    # The default is derived from that flake's own variant names, none of
+    # which this is.
+    icon = "zen-browser";
+  };
+}
 ```
+
+Its sine-mods support is the one part that will not work this way: it writes
+into `lib/zen-bin-*`, which is the layout of a repacked release tarball rather
+than of a `mach` build, so enabling it silently does nothing here.
 
 `nix/zen-browser.nix` reads the Firefox version out of `surfer.json` so the
 fetched source always matches the base the patches target. The source hash next
@@ -115,8 +152,12 @@ cache, so machines substitute Zen instead of compiling it. `garnix.yaml` names
 `packages.x86_64-linux.zen-browser-unwrapped` explicitly, which keeps CI off
 `aarch64-linux`. The only aarch64 builder registered against that instance is
 a two-core box, where a Firefox build would run for days. The flake still
-declares aarch64 so that platform can build locally. The cache is private and
-netrc-authenticated; its host and public key are configured out of band.
+declares aarch64 so that platform can build locally.
+
+This repository is public and all of its flake inputs are public, so the
+closures garnix builds are served from the public cache. Adding it as a
+substituter means a `nix build` of this flake downloads Zen rather than
+compiling it, which is the difference between a minute and several hours.
 
 **GitHub Actions** produces the conventional artifacts.
 `fork-linux-release.yml` builds the x86_64 tarball and publishes a release,
