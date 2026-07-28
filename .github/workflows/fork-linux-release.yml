@@ -38,6 +38,14 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # Compilation cache, backed by the Actions cache. A cold build is around
+      # four hours, so the runs that benefit are the ones that follow a failure
+      # or a small patch fix. The repository cache is capped at 10 GB and a
+      # Firefox object cache will reach it, so expect eviction to blunt this on
+      # builds weeks apart; clear-all-cache.yml is there for when it goes stale.
+      SCCACHE_GHA_ENABLED: "true"
+      CARGO_INCREMENTAL: 0
     steps:
       # First, before anything expensive. The version is baked into the binary
       # by the surfer step and becomes a public tag four hours later, so a bad
@@ -74,6 +82,20 @@ jobs:
             libgtk2.0-dev libpython3-dev m4 uuid libasound2-dev libcurl4-openssl-dev \
             libdbus-1-dev libdrm-dev libdbus-glib-1-dev libgtk-3-dev libpulse-dev \
             libx11-xcb-dev libxt-dev xvfb lld llvm
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@main
+        with:
+          disable_annotations: true
+
+      # sccache reaches the Actions cache through these two, which are otherwise
+      # only visible to actions rather than to plain run: steps.
+      - name: Expose actions cache variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env['ACTIONS_CACHE_URL'])
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env['ACTIONS_RUNTIME_TOKEN'])
 
       # surfer initialises a git repo inside engine/ on a zen_browser branch and
       # commits the pristine source into it before patching. Without an identity

@@ -1,0 +1,28 @@
+name: Cleanup cache
+on:
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    # Deleting a cache entry needs actions:write and nothing else. This was
+    # write-all, which handed a cache-clearing job the ability to push code.
+    permissions:
+      actions: write
+    steps:
+      - name: Cleanup
+        run: |
+          echo "Fetching list of cache key"
+          cacheKeysForPR=$(gh cache list --limit 1000 --json id --jq '.[].id')
+
+          ## Setting this to not fail the workflow while deleting cache keys.
+          set +e
+          echo "Deleting caches..."
+          for cacheKey in $cacheKeysForPR
+          do
+              gh cache delete $cacheKey
+          done
+          echo "Done"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}

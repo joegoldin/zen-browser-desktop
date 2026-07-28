@@ -17,10 +17,8 @@ across a restart. Everything else is stock Zen, tracking upstream `dev`.
 
 > ### Unofficial fork
 >
-> A fork of [zen-browser/desktop](https://github.com/zen-browser/desktop).
-> Upstream [declined](https://github.com/zen-browser/desktop/pull/14746) the
-> tree-style tabs work, so it lives here instead. Not affiliated with or
-> endorsed by the Zen team.
+> A fork of [zen-browser/desktop](https://github.com/zen-browser/desktop), not
+> affiliated with or endorsed by the Zen team.
 >
 > It keeps upstream's application id and binary name, so it is a drop-in
 > replacement and shares the same profile directory as stock Zen. Two
@@ -50,18 +48,15 @@ Lives in `src/zen/tab-tree`, with mochitests in `src/zen/tests/tab-tree`.
 `src/zen/space-routing/ZenManagedSpaces.sys.mjs` lets Spaces and their
 container assignments be declared from an enterprise policy file rather than
 clicked in by hand, which is what makes the browser configurable from a Nix
-module. Upstream [declined](https://github.com/zen-browser/desktop/pull/14749)
-this too.
+module.
 
 #### Container routing on Space move
 
-Moving a tab into a Space adopts that Space's container. Still
-[open upstream](https://github.com/zen-browser/desktop/pull/14750).
+Moving a tab into a Space adopts that Space's container.
 
 #### A Nix flake
 
-Builds Zen from source with `buildMozillaMach`, described below. Upstream
-[declined](https://github.com/zen-browser/desktop/pull/14751) it as well.
+Builds Zen from source with `buildMozillaMach`, described below.
 
 ### Installing
 
@@ -172,9 +167,9 @@ without a Nix store.
 ### Tracking upstream
 
 `merge-upstream-zen.yml` runs when you dispatch it. It merges `upstream/dev` on
-a scratch branch and opens a PR; it never pushes to `dev` and never resets it. A conflict
-is expected on Firefox bumps and is not treated as an error. The markers are
-committed and the PR says so.
+a scratch branch and opens a PR; it never pushes to `dev` and never resets it.
+A conflict is expected on Firefox bumps and is not treated as an error. The
+markers are committed and the PR says so.
 
 Conflicts concentrate in four `.patch` files plus `surfer.json`, because a
 Firefox bump shifts the line numbers every hunk header refers to. The
