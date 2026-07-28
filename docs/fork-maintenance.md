@@ -59,9 +59,9 @@ never touches `dev` directly: a clean merge pushes `sync/upstream-YYYY-MM-DD`
 and opens a PR, a conflict opens a PR that says so with the markers left in
 place.
 
-It only ever merges. The job it replaced reset `dev` to upstream and replayed a
-single commit on top, which was correct when `dev` was a mirror and would now
-delete the fork.
+It only ever merges, and that is load-bearing rather than stylistic: `dev`
+carries the fork's own commits, so anything that moves it non-additively
+destroys them.
 
 Keeping the cadence short still matters, timer or not. Four one-week gaps are
 much easier than one six-week gap, because Firefox-bump conflicts compound.
@@ -100,13 +100,21 @@ applies to a fresh Firefox checkout.
 
 ## Verification
 
-After any upstream merge, before it reaches `dev`:
+Pushing the sync branch runs lint on garnix, which is also where a patch that
+merged cleanly but no longer applies shows up, since linting needs the import
+to have succeeded first. The mochitests are yours to run, before the merge
+reaches `dev`:
 
 ```bash
-devenv shell -- bash -c 'npm run lint'
 devenv shell -- bash -c 'npm test -- tab-tree --headless'
 devenv shell -- bash -c 'npm test -- window_sync --headless'
 devenv shell -- bash -c 'npm test -- space_routing --headless'
+```
+
+Run lint locally the same way when you want it before pushing:
+
+```bash
+devenv shell -- bash -c 'npm run lint'
 ```
 
 Baselines, all measured: lint clean, tab-tree 142/0, window_sync 28/0,

@@ -1,27 +1,20 @@
-# Linux release build for the fork.
+# Builds the fork's x86_64 Linux release: a tarball, published as a GitHub
+# release, from which the package job then cuts a deb and an rpm. That tarball
+# is also what the AUR package and the Nix repack path source.
 #
-# Adapted from upstream's linux-release-build.yml. Do not diff the two
-# expecting a near-match; this is a deliberate reduction:
+# It is deliberately not cut from the Nix build, which hard-codes /nix/store
+# into the ELF interpreter and RPATH and so cannot be repackaged for a machine
+# without a Nix store.
 #
-#   - workflow_dispatch rather than workflow_call, so it can be triggered
-#   - stock ubuntu-latest rather than blacksmith/self-hosted
-#   - no aarch64 leg
-#   - ZEN_GA_DISABLE_PGO, skipping the two-stage PGO build (a profile
-#     generation run under Xvfb, roughly double the build time)
-#   - adds a Publish release step upstream has no equivalent of
+# x86_64 only, and PGO off via ZEN_GA_DISABLE_PGO: the two-stage profile-
+# generation build runs under Xvfb and roughly doubles a build that already
+# takes hours. The runner is stock ubuntu-latest, so the 6 h job limit and the
+# runner's disk are both real constraints here.
 #
-# and it drops several things upstream needs that this fork does not: the
-# sccache/actions-cache steps, Setup Git, the DEPLOY_KEY checkout token (no
-# submodules here), the SURFER_CERT_PATCH_ISSUER/_NAME secrets (Windows NSIS
-# strings only), the three ZEN_*_API_KEY secrets, continue-on-error on Build,
-# and the MOZ_BUILD_DATE input. Every one of those is optional at the point
-# it is consumed — the build proceeds without them; the shipped browser just
-# carries no embedded API keys.
-#
-# The tarball this produces is the base for the deb, the rpm and the AUR
-# package. It is deliberately NOT the Nix build: a Nix build hard-codes
-# /nix/store into the ELF interpreter and RPATH, so it cannot be repackaged
-# for a machine without a Nix store.
+# No secrets beyond the automatic GITHUB_TOKEN. Upstream's equivalent passes
+# API keys for safebrowsing, location and Mozilla services, each guarded by a
+# presence check in release-build.sh, so the build succeeds without them and
+# the browser simply ships with none embedded.
 name: Fork Linux release
 
 on:

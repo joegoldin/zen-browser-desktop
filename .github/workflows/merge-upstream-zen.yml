@@ -91,7 +91,7 @@ jobs:
             body=$'This merge conflicted. The conflict markers are committed on the branch for you to resolve.\n\nConflicts on a Firefox bump are expected and concentrate in the four engine .patch files plus surfer.json. The resolution procedure, including the hunk renumbering and the validation step that catches a silently corrupt patch, is in docs/fork-maintenance.md.\n\nRun the full regression gate before merging.'
           else
             title="Upstream sync ($BRANCH)"
-            body=$'Merged cleanly. A clean textual merge of a .patch file can still produce a patch that no longer applies, so run the regression gate before merging:\n\n```\ndevenv shell -- bash -c "npm run lint"\ndevenv shell -- bash -c "npm test -- tab-tree --headless"\ndevenv shell -- bash -c "npm test -- window_sync --headless"\ndevenv shell -- bash -c "npm test -- space_routing --headless"\n```'
+            body=$'Merged cleanly. A clean textual merge of a .patch file can still produce a patch that no longer applies; garnix lints this branch, which catches that, because linting needs the import to have succeeded first.\n\nThe mochitests are not automated. Run them before merging:\n\n```\ndevenv shell -- bash -c "npm test -- tab-tree --headless"\ndevenv shell -- bash -c "npm test -- window_sync --headless"\ndevenv shell -- bash -c "npm test -- space_routing --headless"\n```'
           fi
           # A re-run after a failure reuses the same branch, so a PR may already
           # be open against it. Updating it is right; failing is not.
