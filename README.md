@@ -127,8 +127,8 @@ without a Nix store.
 
 ### Tracking upstream
 
-`merge-upstream-zen.yml` runs weekly. It merges `upstream/dev` on a scratch
-branch and opens a PR; it never pushes to `dev` and never resets it. A conflict
+`merge-upstream-zen.yml` runs when you dispatch it. It merges `upstream/dev` on
+a scratch branch and opens a PR; it never pushes to `dev` and never resets it. A conflict
 is expected on Firefox bumps and is not treated as an error. The markers are
 committed and the PR says so.
 

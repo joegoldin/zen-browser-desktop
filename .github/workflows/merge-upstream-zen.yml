@@ -1,9 +1,10 @@
 # Merges upstream Zen into this fork's dev.
 #
-# Named merge-upstream-zen rather than sync-upstream because upstream already
-# ships .github/workflows/sync-upstream.yml, which does something different
-# (pulls new Firefox point releases into Zen) and is called as a reusable
-# workflow by check-candidate-release.yml.
+# Named merge-upstream-zen rather than sync-upstream because upstream ships its
+# own sync-upstream.yml, which does something different (pulls new Firefox point
+# releases into Zen). This fork deleted that file, but upstream still has it, so
+# every merge from upstream reintroduces it. Deleting it again is the correct
+# resolution; keeping the names distinct is what stops that being a conflict.
 #
 # This NEVER pushes to dev and NEVER resets it. The job it replaces reset dev
 # to upstream and replayed a single commit on top, which was correct when dev
@@ -15,9 +16,11 @@
 # docs/fork-maintenance.md for the resolution procedure.
 name: Merge upstream Zen
 
+# Dispatch only. A Firefox bump wants a person present to resolve the .patch
+# conflicts and run the regression gate, so this runs when you ask it to rather
+# than on a timer. Do run it often: four one-week gaps resolve far more easily
+# than one six-week gap, because patch conflicts compound.
 on:
-  schedule:
-    - cron: "0 9 * * 1" # Mondays, ~02:00 America/Los_Angeles
   workflow_dispatch:
 
 permissions:

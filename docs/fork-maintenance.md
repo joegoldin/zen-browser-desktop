@@ -11,7 +11,7 @@ correct rather than merely textually clean.
 packages build from it.
 
 ```
-upstream/dev ──(scheduled merge)──▶ dev  ← the browser
+upstream/dev ──(dispatched merge)──▶ dev  ← the browser
                                      │
                                      ├── feat/space-container-routing
                                      └── feat/nix-flake
@@ -48,17 +48,23 @@ because Zen's version lives in its release tag rather than a tracked file.
 
 ## Upstream sync
 
-`.github/workflows/merge-upstream-zen.yml` runs weekly. It attempts
-`git merge upstream/dev` on a scratch branch and never touches `dev` directly:
-a clean merge pushes `sync/upstream-YYYY-MM-DD` and opens a PR, a conflict
-opens a PR that says so with the markers left in place.
+`.github/workflows/merge-upstream-zen.yml` runs on dispatch, not a timer: a
+Firefox bump wants a person present to resolve the patch conflicts and run the
+regression gate. It attempts `git merge upstream/dev` on a scratch branch and
+never touches `dev` directly: a clean merge pushes `sync/upstream-YYYY-MM-DD`
+and opens a PR, a conflict opens a PR that says so with the markers left in
+place.
 
 It only ever merges. The job it replaced reset `dev` to upstream and replayed a
 single commit on top, which was correct when `dev` was a mirror and would now
 delete the fork.
 
-Keeping the cadence short matters more than it looks. Four one-week gaps are
+Keeping the cadence short still matters, timer or not. Four one-week gaps are
 much easier than one six-week gap, because Firefox-bump conflicts compound.
+
+Upstream keeps its own build workflows, which this fork deleted: they target
+blacksmith and self-hosted runners it does not have. A merge from upstream
+reintroduces them, and deleting them again is the correct resolution.
 
 ## The five recurring conflict points
 
