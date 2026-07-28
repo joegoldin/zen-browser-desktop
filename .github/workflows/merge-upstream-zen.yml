@@ -1,0 +1,90 @@
+# Merges upstream Zen into this fork's dev.
+#
+# Named merge-upstream-zen rather than sync-upstream because upstream already
+# ships .github/workflows/sync-upstream.yml, which does something different
+# (pulls new Firefox point releases into Zen) and is called as a reusable
+# workflow by check-candidate-release.yml.
+#
+# This NEVER pushes to dev and NEVER resets it. The job it replaces reset dev
+# to upstream and replayed a single commit on top, which was correct when dev
+# was a mirror and would now delete the entire fork. Everything lands on a
+# branch behind a PR.
+#
+# A conflict here is expected on Firefox version bumps and is concentrated in
+# four .patch files plus surfer.json. See
+# docs/plans/2026-07-28-fork-maintenance-design.md for the resolution procedure.
+name: Merge upstream Zen
+
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Mondays, ~02:00 America/Los_Angeles
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# The branch name is derived from the date, so two runs on the same day would
+# race to push the same ref and the loser would fail on a non-fast-forward.
+concurrency:
+  group: merge-upstream-zen
+  cancel-in-progress: false
+
+jobs:
+  merge-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Merge upstream/dev
+        id: merge
+        run: |
+          # -e explicitly rather than relying on the runner's default shell
+          # flags: without it, a failed fetch falls through to an empty diff
+          # and the job reports success having done nothing.
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/zen-browser/desktop.git
+          git fetch upstream dev
+
+          branch="sync/upstream-$(date -u +%Y-%m-%d)"
+          git checkout -b "$branch"
+
+          if git merge --no-edit upstream/dev; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            # Keep the conflict markers: the PR is a place for a human to
+            # resolve them, not a report that something went wrong.
+            git add -A
+            git commit -m "WIP: upstream merge with conflicts to resolve"
+          fi
+
+          if [ -z "$(git log origin/dev..HEAD --oneline)" ]; then
+            echo "empty=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "empty=false" >> "$GITHUB_OUTPUT"
+            git push origin "$branch"
+          fi
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Open PR
+        if: steps.merge.outputs.empty == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CONFLICT: ${{ steps.merge.outputs.conflict }}
+          BRANCH: ${{ steps.merge.outputs.branch }}
+        run: |
+          if [ "$CONFLICT" = "true" ]; then
+            title="Upstream sync ($BRANCH) — CONFLICTS, needs resolution"
+            body=$'This merge conflicted. The conflict markers are committed on the branch for you to resolve.\n\nConflicts on a Firefox bump are expected and concentrate in the four engine .patch files plus surfer.json. The resolution procedure, including the hunk renumbering and the validation step that catches a silently corrupt patch, is in docs/plans/2026-07-28-fork-maintenance-design.md.\n\nRun the full regression gate before merging.'
+          else
+            title="Upstream sync ($BRANCH)"
+            body=$'Merged cleanly. A clean textual merge of a .patch file can still produce a patch that no longer applies, so run the regression gate before merging:\n\n```\ndevenv shell -- bash -c "npm run lint"\ndevenv shell -- bash -c "npm test -- tab-tree --headless"\ndevenv shell -- bash -c "npm test -- window_sync --headless"\ndevenv shell -- bash -c "npm test -- space_routing --headless"\n```'
+          fi
+          gh pr create --base dev --head "$BRANCH" --title "$title" --body "$body"
