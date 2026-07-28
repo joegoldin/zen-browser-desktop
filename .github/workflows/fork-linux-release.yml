@@ -132,3 +132,64 @@ jobs:
             --title "$VERSION" \
             --notes "Zen with native tree-style tabs. Unofficial fork of zen-browser/desktop." \
             ./zen.linux-x86_64.tar.xz
+
+  package:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: zen.linux-x86_64.tar.xz
+
+      - name: Install fpm
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby ruby-dev build-essential rpm
+          sudo gem install --no-document fpm
+
+      - name: Lay out the tree
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p root/opt/zen-tst root/usr/bin root/usr/share/applications
+          tar -xJf zen.linux-x86_64.tar.xz -C root/opt/zen-tst --strip-components=1
+          ln -s /opt/zen-tst/zen root/usr/bin/zen
+          cp packaging/zen.desktop root/usr/share/applications/zen.desktop
+
+      - name: Build deb and rpm
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # fpm rejects a dash in an rpm version, so the -tst.N suffix moves
+          # into the iteration field for rpm and stays in the version for deb.
+          rpm_version="${VERSION%%-*}"
+          rpm_iteration="${VERSION#*-}"
+          for target in deb rpm; do
+            if [ "$target" = "rpm" ]; then
+              ver="$rpm_version"; iter="$rpm_iteration"
+            else
+              ver="$VERSION"; iter="1"
+            fi
+            fpm -s dir -t "$target" \
+              -n zen-browser-tst \
+              -v "$ver" \
+              --iteration "$iter" \
+              --description "Zen Browser with native tree-style tabs (unofficial fork)" \
+              --url "https://github.com/joegoldin/zen-browser-desktop" \
+              --license MPL-2.0 \
+              --conflicts zen-browser \
+              --provides zen-browser \
+              -C root .
+          done
+
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: gh release upload "$VERSION" ./*.deb ./*.rpm
