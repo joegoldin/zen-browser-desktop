@@ -71,6 +71,10 @@
     #firstHapticFeedbackPlayed = false;
 
     #dragOverSplit = {};
+    #dragOverNest = {};
+    #dragOverReorder = {};
+    #flipInProgress = false;
+    #flipStart = null;
 
     constructor(tabbrowserTabs) {
       super(tabbrowserTabs);
@@ -102,9 +106,34 @@
       );
       XPCOMUtils.defineLazyPreferenceGetter(
         this,
+        "_dndNestToSplitDelay",
+        "zen.tab-tree.drag-nest-to-split-delayMC",
+        500
+      );
+      XPCOMUtils.defineLazyPreferenceGetter(
+        this,
         "_dndSwitchSpaceDelay",
         "zen.tabs.dnd-switch-space-delay",
         1000
+      );
+      // Read on every dragover/indicator update, so cache them.
+      XPCOMUtils.defineLazyPreferenceGetter(
+        this,
+        "_treeIndentStep",
+        "zen.tab-tree.indent",
+        14
+      );
+      XPCOMUtils.defineLazyPreferenceGetter(
+        this,
+        "_treeSplitZone",
+        "zen.tab-tree.drag-split-zone",
+        25
+      );
+      XPCOMUtils.defineLazyPreferenceGetter(
+        this,
+        "_treeReorderEdge",
+        "zen.tab-tree.drag-reorder-edge",
+        15
       );
 
       ChromeUtils.defineESModuleGetters(
@@ -139,6 +168,17 @@
       this.ZenDragAndDropService.onDragStart(1);
       this.#isOutOfWindow = false;
       gZenCompactModeManager._isTabBeingDragged = true;
+      // Snapshot the resting layout now, before the native drag shifts anything,
+      // so a tree drop can FLIP-animate from where tabs actually were.
+      this.#flipStart = window.gZenTabTree?.enabled
+        ? this.#captureTreeFlip()
+        : null;
+      // Dragging a tree parent grabs its whole branch (selected as a group so
+      // it moves together visually). Tree structure is retained on drop.
+      this.#maybeSelectTreeBranch(tab);
+      if (window.gZenTabTree?.enabled) {
+        window.gZenTabTree._dragActive = true;
+      }
       super.startTabDrag(event, tab, ...args);
       const dt = event.dataTransfer;
       if (isTabGroupLabel(tab)) {
@@ -156,6 +196,39 @@
       if (tab.hasAttribute("zen-essential")) {
         tab.style.visibility = "hidden";
       }
+    }
+
+    #maybeSelectTreeBranch(tab) {
+      const tree = window.gZenTabTree;
+      if (
+        !tree?.enabled ||
+        tab.multiselected ||
+        isTabGroupLabel(tab) ||
+        !tree.isTreeEligible(tab)
+      ) {
+        return;
+      }
+      const descendants = tree.getDescendants(tab);
+      if (!descendants.length) {
+        return;
+      }
+      // Select the whole branch so move-together drags it as one block. Remember
+      // the root for dragend, and mark the container so this auto-selection isn't
+      // rendered as a manual multiselect highlight.
+      tree._branchDragRoot = tab;
+      gBrowser.clearMultiSelectedTabs();
+      gBrowser.addToMultiSelectedTabs(tab);
+      for (const d of descendants) {
+        if (tree.isSplitGroup(d)) {
+          for (const t of d.tabs) {
+            gBrowser.addToMultiSelectedTabs(t);
+          }
+        } else {
+          gBrowser.addToMultiSelectedTabs(d);
+        }
+      }
+      gBrowser.lastMultiSelectedTab = tab;
+      this._tabbrowserTabs.setAttribute("zen-branch-dragging", "true");
     }
 
     #createDragImageForTabs(movingTabs) {
@@ -777,6 +850,7 @@
       });
     }
 
+    // eslint-disable-next-line complexity -- inherently branchy drag-over-split state machine
     #handle_tabDragOverToSplit(event) {
       if (!this._dndSplitEnabled) {
         return;
@@ -784,13 +858,46 @@
 
       const dt = event.dataTransfer;
       const draggedTab = dt.mozGetDataAt(TAB_DROP_TYPE, 0);
-      if (!isTab(draggedTab)) {
+      // A split group is dragged via its tab-group label element; resolve that to
+      // the group so it can be nested/reordered as one node.
+      const draggedNode = isTabGroupLabel(draggedTab)
+        ? draggedTab.group
+        : draggedTab;
+      if (
+        !isTab(draggedTab) &&
+        !window.gZenTabTree?.isSplitGroup(draggedNode)
+      ) {
         return;
       }
 
       const dragData = draggedTab._dragData;
       const movingTabsSet = dragData.movingTabsSet;
-      const dropElement = event.target.closest(".tabbrowser-tab");
+      const tree = window.gZenTabTree;
+      const nodeOf = t => (tree?.enabled ? tree.treeNodeFor(t) : t);
+      // A split/group drag leaves movingTabsSet empty, so fall back to the primary
+      // dragged node (matching the drop handlers); otherwise the tree path resolves
+      // to nothing for splits.
+      const draggedSource = movingTabsSet?.size
+        ? [...movingTabsSet]
+        : [draggedNode];
+      const draggedNodes = new Set(draggedSource.map(nodeOf));
+
+      let dropElement = event.target.closest(".tabbrowser-tab");
+      // Below the last non-dragged tab there's nothing to hit, so target its bottom
+      // edge — that's what lets you reorder/outdent at the very bottom even when the
+      // list ends in a nested branch (and works when dragging the last tab itself).
+      // Once the cursor is clearly below the list it's the root area, so snap to 0.
+      let belowList = false;
+      if (!dropElement && tree?.enabled) {
+        const lastTab = tree.lastDropTab(draggedNodes);
+        if (lastTab) {
+          const r = window.windowUtils.getBoundsWithoutFlushing(lastTab);
+          if (event.clientY >= r.bottom) {
+            dropElement = lastTab;
+            belowList = event.clientY >= r.bottom + 6;
+          }
+        }
+      }
 
       // TODO: After Cheff adds split view support for essentials, don't forget to remove the check
       if (
@@ -798,69 +905,211 @@
         !isTab(dropElement) ||
         dropElement.hasAttribute("zen-essential") ||
         dropElement.hasAttribute("zen-glance-tab") ||
-        dropElement?.group?.hasAttribute("split-view-group") ||
-        movingTabsSet.size > 1
+        dropElement.hasAttribute("zen-empty-tab") ||
+        dropElement.hasAttribute("zen-live-folder-item-id") ||
+        draggedTab.hasAttribute("zen-live-folder-item-id")
       ) {
         this._clearDragOverSplit();
+        this._clearDragOverNest();
+        // Keep the last reorder level: when the cursor moves into the empty space
+        // past the last tab, the drop should still honor the level you dialed in
+        // (e.g. outdent to root), not snap back to nesting under the last tab.
         return;
       }
 
+      // With the tree on, a split group is a single node: target/drag its group
+      // element. With the tree off, keep the old behavior of ignoring splits.
       if (
-        movingTabsSet.has(dropElement) ||
-        !isTab(draggedTab) ||
-        draggedTab?.group?.hasAttribute("split-view-group") ||
-        draggedTab.hasAttribute("zen-live-folder-item-id") ||
-        dropElement.hasAttribute("zen-live-folder-item-id")
+        !tree?.enabled &&
+        (dropElement.group?.hasAttribute("split-view-group") ||
+          draggedTab.group?.hasAttribute("split-view-group"))
       ) {
+        this.#clearAllDragOverTree();
+        return;
+      }
+      const targetNode = nodeOf(dropElement);
+      if (draggedNodes.has(targetNode)) {
+        // Hovering over the tree we're dragging is not a drop target: hide the
+        // live nest/split visuals and the reorder line so there's no misleading
+        // preview over our own branch. KEEP the last resolved reorder anchor,
+        // though, so releasing here still honors the level already dialed in over
+        // a valid neighbor instead of falling back to re-nesting under it.
         this._clearDragOverSplit();
+        this._clearDragOverNest();
+        gZenPinnedTabManager.removeTabContainersDragoverClass();
         return;
       }
 
-      const rect = window.windowUtils.getBoundsWithoutFlushing(dropElement);
+      const rect = window.windowUtils.getBoundsWithoutFlushing(targetNode);
       const { clientX, clientY } = event;
-      const targetX = rect.x;
-      const targetTop = rect.top;
-      const targetWidth = rect.width;
-      const targetHeight = rect.height;
+      const treeOk =
+        tree?.enabled && [...draggedNodes].every(n => tree.isTreeEligible(n));
 
-      const edgeZoneThreshold = this._dndSplitThreshold / 100;
-
-      const overlapRatioY = (clientY - targetTop) / targetHeight;
+      // Vertical edges reorder (drop in the gap above/below), with a live indent
+      // preview whose level follows the cursor horizontally — drag left to
+      // outdent, all the way to root level 0.
+      const edgeZoneThreshold = this._treeReorderEdge / 100;
+      const overlapRatioY = (clientY - rect.top) / rect.height;
       if (
         overlapRatioY < edgeZoneThreshold ||
         overlapRatioY > 1 - edgeZoneThreshold
       ) {
         this._clearDragOverSplit();
+        this._clearDragOverNest();
+        if (treeOk) {
+          this.#updateReorderIndicator(
+            targetNode,
+            overlapRatioY < edgeZoneThreshold,
+            clientX,
+            draggedNodes,
+            belowList ? 0 : null
+          );
+        } else {
+          this._clearDragOverReorder();
+        }
         return;
       }
 
-      const isLeft = clientX < targetX + targetWidth / 2;
-      const dropSide = isLeft ? "left" : "right";
+      // Central band nests under the target. Only a normal tab's rightmost zone
+      // arms split (you can't split into an existing split), and only after a
+      // deliberate hold; everywhere else stays a tree action.
+      const canNest = treeOk && tree.isTreeEligible(targetNode);
+      // Left of the (indented) target row means dragging shallower: un-nest via a
+      // reorder line instead of nesting under the target, so the drop matches the
+      // indicator no matter where in the row you release.
+      const unNest = canNest && clientX < rect.x - 2;
+      const splitZone = this._treeSplitZone / 100;
+      // Either horizontal edge zone arms a split: left puts the dragged tab on
+      // the left, right on the right; the middle stays a nest.
+      const inLeftZone = clientX < rect.x + rect.width * splitZone;
+      const inRightZone = clientX > rect.x + rect.width * (1 - splitZone);
+      const inSplitZone = inLeftZone || inRightZone;
+      const dropSide = inLeftZone ? "left" : "right";
+      const draggedIsSplit = [...draggedNodes].some(n => tree?.isSplitGroup(n));
+      const canSplit =
+        draggedSource.length <= 1 &&
+        !draggedIsSplit &&
+        !tree?.isSplitGroup(targetNode);
 
-      // If the drop side or element changes, clear dragOverSplit
       if (
         this.#dragOverSplit.data?.dropElement !== dropElement ||
         this.#dragOverSplit.data?.dropSide !== dropSide
       ) {
         this._clearDragOverSplit();
       }
+      const splitEscalated = !!this.#dragOverSplit.canDrop;
 
-      if (
-        this.#dragOverSplit.timer &&
-        this.#dragOverSplit.data?.dropElement === dropElement &&
-        this.#dragOverSplit.data?.dropSide === dropSide
-      ) {
-        // Timer already running for the same target and side, do nothing
-        return;
+      if (canNest && !splitEscalated) {
+        this.#showNestOrUnnest(targetNode, rect, clientX, draggedNodes, unNest);
+      } else if (!canNest) {
+        this._clearDragOverNest();
+        this._clearDragOverReorder();
       }
 
-      this.#dragOverSplit.data = {
-        dropElement,
-        dropSide,
-      };
-      this.#dragOverSplit.timer = setTimeout(() => {
-        this.#createFakeTabSplit(dropElement, dropSide);
-      }, this._dndSplitDelay);
+      if (inSplitZone && canSplit) {
+        if (!this.#dragOverSplit.timer && !splitEscalated) {
+          this.#dragOverSplit.data = { dropElement, dropSide };
+          this.#dragOverSplit.timer = setTimeout(
+            () => {
+              this.#dragOverSplit.timer = null;
+              this._clearDragOverNest();
+              this._clearDragOverReorder();
+              this.#createFakeTabSplit(dropElement, dropSide);
+            },
+            canNest ? this._dndNestToSplitDelay : this._dndSplitDelay
+          );
+        }
+      } else if (!inSplitZone) {
+        // Left the split zone: cancel any pending/active split, restore nest.
+        this._clearDragOverSplit();
+        if (canNest) {
+          this.#showNestOrUnnest(
+            targetNode,
+            rect,
+            clientX,
+            draggedNodes,
+            unNest
+          );
+        }
+      }
+    }
+
+    // In the central band, nest under the target, or — when dragged left of its
+    // row — show a reorder line to un-nest, so the indicator and the drop agree.
+    #showNestOrUnnest(targetNode, rect, clientX, draggedNodes, unNest) {
+      if (unNest) {
+        this._clearDragOverNest();
+        this.#updateReorderIndicator(targetNode, false, clientX, draggedNodes);
+      } else {
+        this._clearDragOverReorder();
+        this.#showNestIndicator(targetNode, rect);
+      }
+    }
+
+    #clearAllDragOverTree() {
+      this._clearDragOverSplit();
+      this._clearDragOverNest();
+      this._clearDragOverReorder();
+    }
+
+    // Re-indent the existing native drop indicator to the level the dragged node
+    // will land at, so there's a single accurate line rather than a second one.
+    #setNativeIndicatorIndent(level0Left, level, rightEdge) {
+      const indentStep = this._treeIndentStep;
+      const left = level0Left + level * indentStep;
+      const indicator = gZenPinnedTabManager.dragIndicator;
+      indicator.style.setProperty("--indicator-left", `${left}px`);
+      indicator.style.setProperty(
+        "--indicator-width",
+        `${Math.max(40, rightEdge - left)}px`
+      );
+    }
+
+    // Reorder: the native drag already placed its line in the gap; shift only its
+    // indent to the level chosen by the cursor's horizontal position. Default is
+    // a sibling of the node above the gap; drag right to nest under it, left to
+    // outdent toward root level 0.
+    #updateReorderIndicator(node, before, clientX, draggedNodes, forceLevel) {
+      const tree = window.gZenTabTree;
+      let prev = before ? node.previousElementSibling : node;
+      while (prev && (!tree.isTreeEligible(prev) || draggedNodes.has(prev))) {
+        prev = prev.previousElementSibling;
+      }
+      // The eligible node just below the gap bounds how shallow the drop can go:
+      // dropping shallower than it would orphan it from its branch.
+      let next = before ? node : node.nextElementSibling;
+      while (next && (!tree.isTreeEligible(next) || draggedNodes.has(next))) {
+        next = next.nextElementSibling;
+      }
+      const indentStep = this._treeIndentStep;
+      const { minLevel, maxLevel, prevLevel } = tree.reorderLevelRange(
+        prev,
+        next
+      );
+      let level = prevLevel;
+      if (prev) {
+        const prevRect = window.windowUtils.getBoundsWithoutFlushing(prev);
+        // forceLevel pins the level (e.g. root, when dragging below the list);
+        // otherwise anchor "sibling" at the tab-above's content so hovering its
+        // row keeps the sibling level, a clear drag right nests, left outdents.
+        const steps =
+          forceLevel != null
+            ? forceLevel - prevLevel
+            : Math.round((clientX - (prevRect.x + indentStep)) / indentStep);
+        level = Math.max(minLevel, Math.min(prevLevel + steps, maxLevel));
+        const level0Left = prevRect.left - prevLevel * indentStep;
+        this.#setNativeIndicatorIndent(level0Left, level, prevRect.right);
+      }
+      // Remember the resolved anchor + level so the drop lands exactly here.
+      this.#dragOverReorder.prev = prev;
+      this.#dragOverReorder.level = level;
+      this.#dragOverReorder.canDrop = true;
+    }
+
+    _clearDragOverReorder() {
+      this.#dragOverReorder.prev = null;
+      this.#dragOverReorder.level = null;
+      this.#dragOverReorder.canDrop = null;
     }
 
     #createFakeTabSplit(dropElement, dropSide) {
@@ -894,6 +1143,34 @@
       this.#dragOverSplit.fakeTab = null;
       this.#dragOverSplit.data = null;
       this.#dragOverSplit.canDrop = null;
+    }
+
+    // Nest: outline the target row and move the native line just below it, at the
+    // child indent. Re-applied every dragover since the native pass resets it.
+    #showNestIndicator(node, rect) {
+      const tree = window.gZenTabTree;
+      const indentStep = this._treeIndentStep;
+      const level0Left = rect.left - tree.getLevel(node) * indentStep;
+      const indicator = gZenPinnedTabManager.dragIndicator;
+      indicator.setAttribute("orientation", "horizontal");
+      indicator.style.top = `${Math.round(rect.bottom)}px`;
+      this.#setNativeIndicatorIndent(
+        level0Left,
+        tree.getLevel(node) + 1,
+        rect.right
+      );
+      if (this.#dragOverNest.dropElement !== node) {
+        this.#dragOverNest.dropElement?.removeAttribute("zen-tree-nest-target");
+        node.toggleAttribute("zen-tree-nest-target", true);
+      }
+      this.#dragOverNest.dropElement = node;
+      this.#dragOverNest.canDrop = true;
+    }
+
+    _clearDragOverNest() {
+      this.#dragOverNest.dropElement?.removeAttribute("zen-tree-nest-target");
+      this.#dragOverNest.dropElement = null;
+      this.#dragOverNest.canDrop = null;
     }
 
     handle_windowDragEnter(event) {
@@ -955,11 +1232,71 @@
       });
     }
 
+    // The movable elements of the active strip: a normal tab moves itself, a
+    // split tab moves its whole group. Derived from the tab list (not
+    // ariaFocusableItems) so split groups, which aren't aria-focusable, are
+    // included and get animated too.
+    #flipMovableElements() {
+      const els = [];
+      const seen = new Set();
+      for (const tab of gBrowser.tabs) {
+        if (
+          tab.getAttribute("zen-workspace-id") !=
+            gZenWorkspaces.activeWorkspace ||
+          !tab.visible
+        ) {
+          continue;
+        }
+        const el = elementToMove(tab);
+        if (el && !seen.has(el)) {
+          seen.add(el);
+          els.push(el);
+        }
+      }
+      return els;
+    }
+
+    // Snapshot every movable element's on-screen box so a tree drop can
+    // FLIP-animate each one from here to wherever it lands.
+    #captureTreeFlip() {
+      const before = new Map();
+      for (const el of this.#flipMovableElements()) {
+        before.set(el, window.windowUtils.getBoundsWithoutFlushing(el));
+      }
+      return before;
+    }
+
+    // Animate each element from its pre-drop box to its final one in a single
+    // motion, so the dragged branch (including split groups) and the tabs it
+    // displaces all slide straight to their places instead of through the tree.
+    #playTreeFlip(before) {
+      // The drop just moved tabs in the DOM; force a layout flush so the final
+      // boxes are real (getBoundsWithoutFlushing would otherwise read stale 0s).
+      this._tabbrowserTabs.getBoundingClientRect();
+      for (const el of this.#flipMovableElements()) {
+        const old = before.get(el);
+        if (!old) {
+          continue;
+        }
+        const now = window.windowUtils.getBoundsWithoutFlushing(el);
+        const dx = old.left - now.left;
+        const dy = old.top - now.top;
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+          continue;
+        }
+        el.animate(
+          [
+            { transform: `translate(${dx}px, ${dy}px)` },
+            { transform: "translate(0, 0)" },
+          ],
+          { duration: 160, easing: "ease-out" }
+        );
+      }
+    }
+
     handle_drop(event) {
-      const ownerGlobal = event.dataTransfer.mozGetDataAt(
-        TAB_DROP_TYPE,
-        0
-      )?.documentGlobal;
+      const draggedTab = event.dataTransfer.mozGetDataAt(TAB_DROP_TYPE, 0);
+      const ownerGlobal = draggedTab?.documentGlobal;
       if (ownerGlobal?.gZenCompactModeManager) {
         // Sometimes, dragend doesn't always get called when dragging
         // to different windows, see gh-8643.
@@ -970,11 +1307,49 @@
       }
       this.clearSpaceSwitchTimer();
       gZenFolders.highlightGroupOnDragOver(null);
+
+      // A same-window, same-space tab/split drop animates as one block via FLIP.
+      // A split is dragged via its group label, which has no workspace id, so
+      // read it from the group's tab instead.
+      const wsRef = isTabGroupLabel(draggedTab)
+        ? draggedTab.group?.querySelector(".tabbrowser-tab")
+        : draggedTab;
+      const flipBefore = this.#flipStart;
+      this.#flipStart = null;
+      const doFlip =
+        flipBefore &&
+        window.gZenTabTree?.enabled &&
+        !gReduceMotion &&
+        draggedTab?.ownerGlobal === window &&
+        (isTab(draggedTab) || isTabGroupLabel(draggedTab)) &&
+        wsRef?.getAttribute("zen-workspace-id") ==
+          gZenWorkspaces.activeWorkspace;
+      if (doFlip) {
+        this.#flipInProgress = true;
+      }
+
       super.handle_drop(event);
       this.#maybeClearVerticalPinnedGridDragOver();
       this.#handle_dropSwitchSpace(event);
-      this.#handle_dropCreateSplit(event);
-      this._clearDragOverSplit();
+      // Split wins if the hold escalated; else nest; else a tree-aware reorder.
+      if (this.#dragOverSplit.canDrop) {
+        this.#handle_dropCreateSplit(event);
+      } else if (this.#dragOverNest.canDrop) {
+        this.#handle_dropNest(event);
+      } else {
+        this.#handle_dropReorder(event);
+      }
+      this.#clearAllDragOverTree();
+
+      if (doFlip) {
+        this.#flipInProgress = false;
+        // Settle any leftover drag transforms so the final boxes are measured
+        // cleanly, then FLIP from the resting layout captured at dragstart.
+        for (const el of this.#flipMovableElements()) {
+          el.style.transform = "";
+        }
+        this.#playTreeFlip(flipBefore);
+      }
     }
 
     #handle_dropSwitchSpace(event) {
@@ -1031,7 +1406,62 @@
       );
     }
 
+    // The tabs a drag actually moves: an explicit movingTabsSet, else the live
+    // multiselection (a manual multiselect drag doesn't always populate the set,
+    // so the primary tab alone would be wrong), else just the dragged tab.
+    #draggedTabsFrom(draggedTab) {
+      const movingTabsSet = draggedTab._dragData?.movingTabsSet;
+      if (movingTabsSet?.size) {
+        return [...movingTabsSet];
+      }
+      return draggedTab.multiselected ? gBrowser.selectedTabs : [draggedTab];
+    }
+
+    #handle_dropNest(event) {
+      if (!this.#dragOverNest.canDrop || !window.gZenTabTree?.enabled) {
+        return;
+      }
+      const dt = event.dataTransfer;
+      const draggedTab = dt.mozGetDataAt(TAB_DROP_TYPE, 0);
+      const target = this.#dragOverNest.dropElement;
+      if (!draggedTab || !target) {
+        return;
+      }
+      const draggedTabs = this.#draggedTabsFrom(draggedTab);
+      this._dontAnimateTabMove = true;
+      this._clearDragOverNest();
+      window.gZenTabTree.handleNestDrop(draggedTabs, target);
+    }
+
+    #handle_dropReorder(event) {
+      if (!window.gZenTabTree?.enabled) {
+        return;
+      }
+      const dt = event.dataTransfer;
+      const draggedTab = dt.mozGetDataAt(TAB_DROP_TYPE, 0);
+      if (!draggedTab) {
+        return;
+      }
+      const draggedTabs = this.#draggedTabsFrom(draggedTab);
+      const r = this.#dragOverReorder;
+      if (r.canDrop) {
+        // Apply the exact anchor + level the indicator resolved.
+        window.gZenTabTree.handleReorderDropAt(draggedTabs, r.prev, r.level);
+      } else {
+        window.gZenTabTree.handleReorderDrop(draggedTabs, null);
+      }
+    }
+
+    // eslint-disable-next-line complexity -- linear element-shape settle reads clearer unsplit
     handle_drop_transition(dropElement, draggedTab, movingTabs, dropBefore) {
+      // A tree drop owns its own FLIP animation; here just settle transforms so
+      // it starts from clean positions (no native per-tab slide to fight with).
+      if (this.#flipInProgress) {
+        for (let item of this._tabbrowserTabs.ariaFocusableItems) {
+          elementToMove(item).style.transform = "";
+        }
+        return;
+      }
       if (
         dropElement?.hasAttribute("zen-empty-tab") &&
         dropElement.group?.isZenFolder
@@ -1192,6 +1622,25 @@
       thisFromGlobal.clearDragOverVisuals();
       ownerGlobal.gZenPinnedTabManager.removeTabContainersDragoverClass();
       thisFromGlobal._clearDragOverSplit();
+      thisFromGlobal._clearDragOverNest();
+      thisFromGlobal._clearDragOverReorder();
+      // Drop the dragstart FLIP snapshot here too, so an aborted drag (never
+      // reaching handle_drop) doesn't hold it until the next drag.
+      thisFromGlobal.#flipStart = null;
+      const tree = ownerGlobal.gZenTabTree;
+      if (tree?.enabled) {
+        tree._dragActive = false;
+        thisFromGlobal._tabbrowserTabs.removeAttribute("zen-branch-dragging");
+        if (tree._branchDragRoot) {
+          const root = tree._branchDragRoot;
+          tree._branchDragRoot = null;
+          // Restore selection to just the branch root after a branch drag.
+          ownerGlobal.gBrowser.clearMultiSelectedTabs();
+          if (root.isConnected) {
+            ownerGlobal.gBrowser.lastMultiSelectedTab = root;
+          }
+        }
+      }
       this.#maybeClearVerticalPinnedGridDragOver();
       thisFromGlobal.originalDragImageArgs = [];
       this.#firstHapticFeedbackPlayed = false;
@@ -1253,6 +1702,8 @@
       if (clearSplitDropIndicator) {
         this._clearDragOverSplit();
       }
+      this._clearDragOverNest();
+      this._clearDragOverReorder();
       gZenPinnedTabManager.removeTabContainersDragoverClass();
     }
 

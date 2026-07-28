@@ -1,0 +1,128 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+.tabbrowser-tab[zen-tree-hidden],
+tab-group[split-view-group][zen-tree-hidden] {
+  display: none !important;
+}
+
+/* During a middle-mouse drag-select, hide per-tab close (X) buttons. The
+   gesture selects a range that's closed together on release, so a hover/
+   multiselected close affordance on individual tabs is misleading mid-drag. */
+#tabbrowser-tabs[zen-multi-drag-selecting] .tab-close-button {
+  display: none !important;
+}
+
+/* Shared twisty look. It's hidden until the parent row is hovered (or stays
+   visible while collapsed so the branch can be reopened). */
+.zen-tree-twisty {
+  width: 16px;
+  height: 16px;
+  -moz-context-properties: fill;
+  fill: currentColor;
+  list-style-image: url("chrome://global/skin/icons/arrow-down.svg");
+  opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    opacity 0.15s ease;
+}
+
+/* On a tab the twisty is a favicon sibling inside the icon <stack>, so it
+   overlays the favicon with no layout width and the parent keeps its own indent.
+   The icon-stack margins keep it left-aligned over the favicon. */
+.tabbrowser-tab .zen-tree-twisty {
+  margin-inline-end: var(--toolbarbutton-inner-padding) !important;
+  margin-inline-start: calc(var(--toolbarbutton-inner-padding) / 3) !important;
+}
+
+/* On a split group it floats over the leftmost tab's favicon. That favicon sits
+   at the tab's inner padding from the edge, so match it (a bare few px reads as
+   left-of-center against the favicon). */
+tab-group[split-view-group] > .zen-tree-twisty {
+  position: absolute;
+  inset-inline-start: var(--toolbarbutton-inner-padding, 8px);
+  inset-block: 0;
+  margin-block: auto;
+  z-index: 3;
+}
+
+#tabbrowser-tabs .tabbrowser-tab[zen-tree-parent]:hover .zen-tree-twisty,
+#tabbrowser-tabs .tabbrowser-tab[zen-tree-collapsed] .zen-tree-twisty,
+#tabbrowser-tabs
+  tab-group[split-view-group][zen-tree-parent]:hover
+  > .zen-tree-twisty,
+#tabbrowser-tabs
+  tab-group[split-view-group][zen-tree-collapsed]
+  > .zen-tree-twisty {
+  opacity: 0.85;
+  pointer-events: auto;
+}
+
+.zen-tree-twisty:hover {
+  opacity: 1;
+}
+
+/* Favicon steps aside while the twisty is shown over it. On a split group the
+   twisty sits over the leftmost tab's favicon, so hide that one. The container's
+   first child is a .zen-tab-group-start spacer, so the leftmost tab is the one
+   right after it (not :first-child).
+
+   Scoped through #tabbrowser-tabs on purpose: a tab with no favicon of its own
+   gets a placeholder square from vertical-tabs.css
+   (`.tab-icon-image:not([src])`, nested under #tabbrowser-tabs and so more
+   specific than a bare class chain), which otherwise keeps showing through
+   underneath the twisty. */
+#tabbrowser-tabs .tabbrowser-tab[zen-tree-parent]:hover .tab-icon-image,
+#tabbrowser-tabs .tabbrowser-tab[zen-tree-collapsed] .tab-icon-image,
+#tabbrowser-tabs
+  tab-group[split-view-group][zen-tree-parent]:hover
+  .tab-group-container
+  > .zen-tab-group-start
+  + .tabbrowser-tab
+  .tab-icon-image,
+#tabbrowser-tabs
+  tab-group[split-view-group][zen-tree-collapsed]
+  .tab-group-container
+  > .zen-tab-group-start
+  + .tabbrowser-tab
+  .tab-icon-image {
+  opacity: 0;
+}
+
+/* Point right when collapsed, down when expanded. */
+.tabbrowser-tab[zen-tree-collapsed] .zen-tree-twisty,
+tab-group[split-view-group][zen-tree-collapsed] > .zen-tree-twisty {
+  transform: rotate(-90deg);
+}
+
+:root:not([zen-sidebar-expanded="true"]) .zen-tree-twisty {
+  display: none;
+}
+
+/* The node a quick-drop will nest under is outlined so the target is obvious. */
+.tabbrowser-tab[zen-tree-nest-target],
+tab-group[split-view-group][zen-tree-nest-target] {
+  outline: 2px solid var(--zen-primary-color, AccentColor);
+  outline-offset: -2px;
+  border-radius: var(--border-radius-medium, 8px);
+}
+
+/* A dragged tree branch is auto-multiselected so it moves as one block, but it
+   shouldn't render as a manual multiselect highlight on the in-place tabs. */
+#tabbrowser-tabs[zen-branch-dragging]
+  .tabbrowser-tab[multiselected]:not([visuallyselected]),
+#tabbrowser-tabs[zen-branch-dragging]
+  tab-group[split-view-group]:has([multiselected]) {
+  --tab-selected-bgcolor: transparent;
+}
+
+#tabbrowser-tabs[zen-branch-dragging]
+  .tabbrowser-tab[multiselected]:not([visuallyselected])
+  .tab-background {
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}

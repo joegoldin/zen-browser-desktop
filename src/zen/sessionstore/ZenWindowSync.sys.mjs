@@ -44,11 +44,35 @@ const OBSERVING = [
 ];
 const INSTANT_EVENTS = ["SSWindowClosing", "TabSelect", "focus"];
 const UNSYNCED_WINDOW_EVENTS = ["TabOpen"];
+// Events that may be queued even while we're handling an event for another
+// window. These handlers are idempotent (they bail out when the target
+// already matches the original), so processing them late can't start a
+// sync loop, while dropping them would permanently lose the change (a
+// favicon is usually only set once per page load).
+//
+// TabClose belongs here for the same reason, and more urgently: dropping it
+// leaves the mirror copies open forever with no later event to clean them up.
+// Its handler is idempotent because it looks the mirror up by id and does
+// nothing when it has already gone.
+//
+// TabOpen likewise. It is what assigns the tab its sync id, so dropping it
+// doesn't just skip one update, it leaves the tab unsyncable for the rest of
+// its life with nothing to retry it. Running it late is safe because it
+// returns early once the tab has an id.
+const CROSS_WINDOW_QUEUED_EVENTS = [
+  "ZenTabIconChanged",
+  "ZenTabLabelChanged",
+  "TabAttrModified",
+  "TabClose",
+  "TabOpen",
+];
 const EVENTS = [
   "TabClose",
 
   "ZenTabIconChanged",
   "ZenTabLabelChanged",
+  "TabAttrModified",
+  "ZenTreeChanged",
 
   "TabMove",
   "TabPinned",
@@ -76,6 +100,7 @@ const EVENTS = [
 const SYNC_FLAG_LABEL = 1 << 0;
 const SYNC_FLAG_ICON = 1 << 1;
 const SYNC_FLAG_MOVE = 1 << 2;
+const SYNC_FLAG_TREE = 1 << 3;
 
 class nsZenWindowSync {
   #initialized = false;
@@ -381,6 +406,10 @@ class nsZenWindowSync {
 
   handleEvent(aEvent) {
     const window = aEvent.currentTarget.documentGlobal ?? aEvent.currentTarget;
+    // A queued handler can run after its tab has been detached, at which point
+    // tab.documentGlobal is null. Remember which window the event came from
+    // while we still know, so handlers can still exclude it.
+    aEvent._zenSourceWindow ??= window;
     if (
       !window.gZenStartup.isReady ||
       !window.gZenWorkspaces?.shouldHaveWorkspaces ||
@@ -394,21 +423,31 @@ class nsZenWindowSync {
     ) {
       return;
     }
+    if (
+      aEvent.type === "TabAttrModified" &&
+      !aEvent.detail?.changed?.includes("image")
+    ) {
+      // We only care about icon updates that don't go through setIcon
+      // (e.g. the progress listener removing a stale favicon).
+      return;
+    }
     if (INSTANT_EVENTS.includes(aEvent.type)) {
       this.#handleNextEventInternal(aEvent);
       return;
     }
-    if (
-      this.#eventHandlingContext.window &&
-      this.#eventHandlingContext.window !== window
-    ) {
+    const contextWindow = this.#eventHandlingContext.window;
+    if (contextWindow && contextWindow !== window) {
       // We're already handling an event for another window.
-      // To avoid re-entrancy issues, we skip this event.
-      return;
+      // To avoid re-entrancy issues, we skip this event, unless its
+      // handler is known to be idempotent and safe to run late.
+      if (!CROSS_WINDOW_QUEUED_EVENTS.includes(aEvent.type)) {
+        return;
+      }
+    } else {
+      this.#eventHandlingContext.window = window;
     }
     const lastHandlerPromise = this.#eventHandlingContext.lastHandlerPromise;
     this.#eventHandlingContext.eventCount++;
-    this.#eventHandlingContext.window = window;
     let resolveNewPromise;
     this.#eventHandlingContext.lastHandlerPromise = new Promise(resolve => {
       resolveNewPromise = resolve;
@@ -522,11 +561,23 @@ class nsZenWindowSync {
       aTargetItem.zenStaticIcon = aOriginalItem.zenStaticIcon;
       if (gBrowser.isTab(aOriginalItem)) {
         try {
-          gBrowser.setIcon(
-            aTargetItem,
+          // Prefer the canonical icon URL (browser.mIconURL, usually a data:
+          // URI) over the image attribute: the attribute may hold a derived
+          // URL (e.g. moz-remote-image:) that setIcon rejects as remote.
+          const icon =
+            aOriginalItem.documentGlobal?.gBrowser.getIcon(aOriginalItem) ||
             aOriginalItem.getAttribute("image") ||
-              gBrowser.getIcon(aOriginalItem)
-          );
+            "";
+          const targetIcon =
+            gBrowser.getIcon(aTargetItem) ||
+            aTargetItem.getAttribute("image") ||
+            "";
+          // Only call setIcon for actual changes. setIcon dispatches
+          // ZenTabIconChanged even for no-op calls, so this also guarantees
+          // icon sync chains between windows always terminate.
+          if (icon !== targetIcon) {
+            gBrowser.setIcon(aTargetItem, icon);
+          }
         } catch {}
       } else if (aOriginalItem.isZenFolder) {
         // Icons are a zen-only feature for tab groups.
@@ -535,10 +586,18 @@ class nsZenWindowSync {
     }
     if (flags & SYNC_FLAG_LABEL) {
       if (gBrowser.isTab(aOriginalItem)) {
-        aTargetItem._zenChangeLabelFlag = true;
-        aTargetItem.zenStaticLabel = aOriginalItem.zenStaticLabel;
-        gBrowser._setTabLabel(aTargetItem, aOriginalItem.label);
-        delete aTargetItem._zenChangeLabelFlag;
+        // Skip no-op label syncs; _setTabLabel dispatches ZenTabLabelChanged
+        // before its own equality check, so syncing an unchanged label would
+        // keep bouncing events between windows.
+        if (
+          aTargetItem.label !== aOriginalItem.label ||
+          aTargetItem.zenStaticLabel !== aOriginalItem.zenStaticLabel
+        ) {
+          aTargetItem._zenChangeLabelFlag = true;
+          aTargetItem.zenStaticLabel = aOriginalItem.zenStaticLabel;
+          gBrowser._setTabLabel(aTargetItem, aOriginalItem.label);
+          delete aTargetItem._zenChangeLabelFlag;
+        }
       } else if (gBrowser.isTabGroup(aOriginalItem)) {
         aTargetItem.label = aOriginalItem.label;
       }
@@ -550,6 +609,31 @@ class nsZenWindowSync {
         "zen-workspace-id"
       );
       this.#syncItemPosition(aOriginalItem, aTargetItem, aWindow);
+    }
+    // Split-view groups are tree nodes too, so sync them as well as tabs.
+    const isTreeNode =
+      gBrowser.isTab(aOriginalItem) ||
+      (gBrowser.isTabGroup(aOriginalItem) &&
+        aOriginalItem.hasAttribute("split-view-group"));
+    if (aWindow.gZenTabTree?.enabled && isTreeNode) {
+      // Replicate the stable id + tree relationship + collapse state, then
+      // rebuild the target window's pointers/visual state from the mirrored
+      // attributes. zen-tree-id is mirrored so parent matching survives the
+      // target window reassigning ids on restore.
+      this.#maybeSyncAttributeChange(aOriginalItem, aTargetItem, "zen-tree-id");
+      this.#maybeSyncAttributeChange(
+        aOriginalItem,
+        aTargetItem,
+        "zen-tree-parent-id"
+      );
+      this.#maybeSyncAttributeChange(
+        aOriginalItem,
+        aTargetItem,
+        "zen-tree-collapsed"
+      );
+      if (flags & (SYNC_FLAG_TREE | SYNC_FLAG_MOVE)) {
+        aWindow.gZenTabTree.rebuildFromAttributes();
+      }
     }
     if (aOriginalItem.hasAttribute("zen-live-folder-item-id")) {
       this.#maybeSyncAttributeChange(
@@ -1112,6 +1196,19 @@ class nsZenWindowSync {
   }
 
   /**
+   * Whether a tab currently holds real loaded content (as opposed to a blank /
+   * not-yet-restored browser). Used to decide cross-window docshell swaps so we
+   * never swap a blank browser in over a tab the user just activated.
+   *
+   * @param {object} aTab - The tab to check.
+   * @returns {boolean} True if the tab's browser has non-blank content.
+   */
+  #hasLiveContent(aTab) {
+    const spec = aTab?.linkedBrowser?.currentURI?.spec;
+    return !!(spec && spec !== "about:blank");
+  }
+
+  /**
    * Handles tab switch or window focus events to synchronize tab contents visibility.
    *
    * @param {Window} aWindow - The window that triggered the event.
@@ -1157,12 +1254,21 @@ class nsZenWindowSync {
         aWindow,
         selectedTab.id
       );
+      const selHasContent = this.#hasLiveContent(selectedTab);
+      const otherHasContent = this.#hasLiveContent(otherSelectedTab);
       selectedTab._zenContentsVisible = true;
-      if (otherSelectedTab) {
+      if (otherSelectedTab && !selHasContent && otherHasContent) {
+        // This tab is blank and the other window holds the live content: pull
+        // it in.
         delete otherSelectedTab._zenContentsVisible;
         promises.push(
           this.#swapBrowserDocShellsAsync(selectedTab, otherSelectedTab)
         );
+      } else if (otherSelectedTab && !otherHasContent && !selHasContent) {
+        // Neither side has live content yet: hand over the visibility flag but
+        // don't swap, so we never pull a blank browser in over this tab (which
+        // is what left the activated tab grey/blank). It will load its own URL.
+        delete otherSelectedTab._zenContentsVisible;
       }
     }
     await Promise.all(promises);
@@ -1355,7 +1461,12 @@ class nsZenWindowSync {
 
   on_TabOpen(aEvent, { ignoreExistingId = false } = {}) {
     const tab = aEvent.target;
-    const window = tab.documentGlobal;
+    // Queued behind another window, this can run after the tab is gone, and
+    // #runOnAllWindows treats a null window as "no window to exclude".
+    const window = tab.documentGlobal ?? aEvent._zenSourceWindow;
+    if (!window) {
+      return;
+    }
     const isUnsyncedWindow = window.gZenWorkspaces.privateWindowOrDisabled;
     if (tab.id && !ignoreExistingId) {
       // This tab was opened as part of a sync operation.
@@ -1374,6 +1485,11 @@ class nsZenWindowSync {
         animate: true,
         createLazyBrowser: true,
         _forZenEmptyTab: tab.hasAttribute("zen-empty-tab"),
+        // Mirror the source tab's container. Without this the synced tab is
+        // created with no container, and getContextIdIfNeeded() fills it from
+        // THIS window's active Space — so a tab opened in a No-Container Space
+        // wrongly inherits the other window's container.
+        userContextId: tab.userContextId,
       });
       newTab.id = tab.id;
       if (!tab.hasAttribute("pending")) {
@@ -1398,6 +1514,14 @@ class nsZenWindowSync {
     }
     this.#maybeEditAllTabsEntryImage(aEvent.target);
     return this.#delegateGenericSyncEvent(aEvent, SYNC_FLAG_ICON);
+  }
+
+  on_TabAttrModified(aEvent) {
+    // Only reached for "image" changes (filtered in handleEvent). Some icon
+    // updates don't go through setIcon and thus never fire ZenTabIconChanged,
+    // for example the tab progress listener removing a stale favicon when a
+    // page without one finishes loading.
+    return this.on_ZenTabIconChanged(aEvent);
   }
 
   on_ZenTabLabelChanged(aEvent) {
@@ -1438,6 +1562,11 @@ class nsZenWindowSync {
 
   on_TabMove(aEvent) {
     this.#delegateGenericSyncEvent(aEvent, SYNC_FLAG_MOVE);
+    return Promise.resolve();
+  }
+
+  on_ZenTreeChanged(aEvent) {
+    this.#delegateGenericSyncEvent(aEvent, SYNC_FLAG_TREE);
     return Promise.resolve();
   }
 
@@ -1485,11 +1614,26 @@ class nsZenWindowSync {
 
   on_TabClose(aEvent) {
     const tab = aEvent.target;
-    const window = tab.documentGlobal;
+    // Falls back to the window recorded at dispatch: by the time a queued
+    // close runs, the tab is already detached and has no documentGlobal, and
+    // a null here would make #runOnAllWindows include the closing tab's own
+    // window and mark the user's close as a sync-propagated one.
+    const window = tab.documentGlobal ?? aEvent._zenSourceWindow;
     this.#runOnAllWindows(window, win => {
       const targetTab = this.getItemFromWindow(win, tab.id);
       if (targetTab) {
+        // Mark the tab so the session store doesn't record this propagated
+        // close in its closed tabs list (and undo-close stack). Otherwise
+        // every synced close would record one closed tab per window, and
+        // undo close tab would restore the mirror copy (often blank or
+        // stale) instead of the tab the user actually closed.
+        targetTab._zenSyncClosing = true;
         win.gBrowser.removeTab(targetTab, { animate: true });
+        if (!targetTab.closing) {
+          // The close was vetoed (e.g. by glance); don't leave the marker
+          // around for a future user-initiated close.
+          delete targetTab._zenSyncClosing;
+        }
       }
     });
   }

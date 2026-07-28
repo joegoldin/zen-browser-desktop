@@ -8,6 +8,12 @@ support-files = [
   "head.js",
 ]
 
+["browser_sync_tab_close.js"]
+
+["browser_sync_tab_icon.js"]
+
 ["browser_sync_tab_label.js"]
 
 ["browser_sync_tab_open.js"]
+
+["browser_sync_tree.js"]
