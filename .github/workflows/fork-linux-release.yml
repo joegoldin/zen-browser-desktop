@@ -166,8 +166,16 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          # fpm rejects a dash in an rpm version, so the -tst.N suffix moves
-          # into the iteration field for rpm and stays in the version for deb.
+          # Both halves of the split below are meaningless unless VERSION has
+          # the documented shape. Without this check a bare "1.21.9b" splits
+          # into version=1.21.9b iteration=1.21.9b and builds happily.
+          if ! printf '%s' "$VERSION" | grep -qE '^[^-]+-tst\.[0-9]+$'; then
+            echo "VERSION must look like 1.21.9b-tst.1, got: $VERSION" >&2
+            exit 1
+          fi
+          # rpm treats a dash as the version/release separator and rewrites any
+          # it finds, so the -tst.N suffix becomes the release field there. deb
+          # has no such restriction and keeps the version string whole.
           rpm_version="${VERSION%%-*}"
           rpm_iteration="${VERSION#*-}"
           for target in deb rpm; do
@@ -176,6 +184,13 @@ jobs:
             else
               ver="$VERSION"; iter="1"
             fi
+            # No --depends yet. The AUR package declares gtk3, libxt,
+            # dbus-glib, nss, libpulse and friends, but those libraries are
+            # named differently on Debian and Fedora and were renamed again in
+            # Debian's time_t transition (libgtk-3-0 to libgtk-3-0t64), so
+            # naming them wrong makes the package refuse to install, which is
+            # worse than omitting them. Install the first real build on each
+            # target and declare what it actually turns out to be missing.
             fpm -s dir -t "$target" \
               -n zen-browser-tst \
               -v "$ver" \
