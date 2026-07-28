@@ -60,8 +60,8 @@ Moving a tab into a Space adopts that Space's container. Still
 
 #### A Nix flake
 
-Also [open upstream](https://github.com/zen-browser/desktop/pull/14751), and
-described below.
+Builds Zen from source with `buildMozillaMach`, described below. Upstream
+[declined](https://github.com/zen-browser/desktop/pull/14751) it as well.
 
 ### Installing
 

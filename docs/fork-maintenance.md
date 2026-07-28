@@ -13,14 +13,18 @@ packages build from it.
 ```
 upstream/dev ──(dispatched merge)──▶ dev  ← the browser
                                      │
-                                     ├── feat/space-container-routing
-                                     └── feat/nix-flake
+                                     └── feat/space-container-routing
 ```
 
-The feature branches held off `dev` are the ones with open PRs upstream, kept
-separate so their diffs stay small and reviewable. If upstream merges one, it
-arrives back through the next sync and conflicts with the copy already in
-`dev`. That conflict is expected and resolves to "already have this".
+`feat/space-container-routing` is held off `dev` because its upstream PR
+([#14750](https://github.com/zen-browser/desktop/pull/14750)) is still open, and
+keeping it separate keeps that diff small and reviewable. If upstream merges it,
+the change arrives back through the next sync and conflicts with the copy
+already in `dev`. That conflict is expected and resolves to "already have this".
+
+Everything else upstream declined, the Nix flake
+([#14751](https://github.com/zen-browser/desktop/pull/14751)) included, so it
+lives on `dev` and there is nothing left to keep reviewable.
 
 Features were merged into `dev` as merge commits rather than squashes, so
 `git log --follow` still explains why a given line exists when a Firefox bump
