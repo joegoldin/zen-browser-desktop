@@ -170,8 +170,26 @@ re-run a slow command). Register a new dir's `browser.toml` in
 ## Lint
 
 ```bash
-npm run lint        # = ./mach lint zen   (operates on engine/, post-import)
+devenv shell -- bash -c 'cd engine && env -u LD_LIBRARY_PATH ./mach lint -l eslint -l stylelint zen'
 ```
+
+Two things make the plain `npm run lint` (= `./mach lint zen`) fail in the
+devenv, both environmental rather than lint findings:
+
+- **`uv: undefined symbol: _rjem_malloc`** (exit 127) while mach builds its lint
+  virtualenv. devenv puts Firefox's jemalloc on `LD_LIBRARY_PATH` and the system
+  `uv` picks it up. Drop the variable for the lint run; lint needs none of those
+  libraries.
+- **`ModuleNotFoundError: No module named 'zstandard'`** — the full `zen` lint
+  set pulls toolchain artifacts (clang-format, rustfmt) it then can't unpack.
+  Restrict to `-l eslint -l stylelint`, which is what covers the Zen JS/CSS.
+
+`engine/zen` is a tree of symlinks into `src/zen` made at import time, so after
+switching branches it can hold dangling links (files the branch doesn't have,
+which make eslint fail with ENOENT) and be missing links for files the branch
+added (which then go unlinted). Re-sync before trusting a run: delete broken
+links with `find engine/zen -xtype l -delete`, then symlink any `src/zen` file
+that has none.
 
 ## Quick fault table
 
