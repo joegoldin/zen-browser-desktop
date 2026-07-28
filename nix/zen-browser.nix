@@ -73,7 +73,13 @@ let
     };
   };
 
-  zen-version = "1.20.2b";
+  # Zen's own version lives in the release tag rather than a tracked file
+  # (package.json is a placeholder 1.0.0), so this is hand-maintained and wants
+  # bumping alongside an upstream release. The -tst suffix marks this as the
+  # tree-style-tabs fork and increments for fork-only fixes between upstream
+  # releases. It names the store path and the reported application version; the
+  # Firefox base is read from surfer.json and stays correct on its own.
+  zen-version = "1.21.9b-tst.1";
 in
 {
   inherit
