@@ -1,0 +1,26 @@
+# Maintainer: joegoldin <joe@joegold.in>
+pkgname=zen-browser-tst-bin
+_pkgname=zen-tst
+pkgver=1.21.9b_tst.1
+pkgrel=1
+pkgdesc="Zen Browser with native tree-style tabs (unofficial fork)"
+arch=('x86_64')
+url="https://github.com/joegoldin/zen-browser-desktop"
+license=('MPL-2.0')
+# The fork keeps upstream's binaryName, so it owns the same /usr/bin/zen.
+# Without these, pacman fails the install with a bare file-conflict error.
+conflicts=('zen-browser' 'zen-browser-bin' 'zen-browser-avx2-bin')
+provides=('zen-browser')
+depends=('gtk3' 'libxt' 'mime-types' 'dbus-glib' 'nss' 'ttf-font' 'libpulse')
+options=('!strip')
+source=("https://github.com/joegoldin/zen-browser-desktop/releases/download/${pkgver//_/-}/zen.linux-x86_64.tar.xz")
+sha256sums=('SKIP')
+
+package() {
+  install -d "$pkgdir/opt/$_pkgname"
+  cp -r "$srcdir/zen/." "$pkgdir/opt/$_pkgname"
+  install -d "$pkgdir/usr/bin"
+  ln -s "/opt/$_pkgname/zen" "$pkgdir/usr/bin/zen"
+  install -Dm644 "$pkgdir/opt/$_pkgname/browser/chrome/icons/default/default128.png" \
+    "$pkgdir/usr/share/icons/hicolor/128x128/apps/zen.png"
+}
