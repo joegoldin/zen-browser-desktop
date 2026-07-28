@@ -12,7 +12,9 @@
 # ephemeral Ubuntu container capped at 18 CPUs / 64 GiB); the package job
 # stays on stock ubuntu-latest.
 #
-# No secrets beyond the automatic GITHUB_TOKEN. Upstream's equivalent passes
+# One secret: RELEASE_TOKEN, a fine-grained PAT scoped to this repository with
+# contents read/write, used only to publish the release (see that step for
+# why the workflow token cannot). Upstream's equivalent additionally passes
 # API keys for safebrowsing, location and Mozilla services, each guarded by a
 # presence check in release-build.sh, so the build succeeds without them and
 # the browser simply ships with none embedded.
@@ -150,18 +152,31 @@ jobs:
 
       - name: Publish release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITHUB_TOKEN cannot create releases here: it is granted
+          # contents:write (visible in Set up job) and still gets HTTP 403
+          # "Resource not accessible by integration" from POST /releases.
+          # RELEASE_TOKEN is a fine-grained PAT with contents read/write on
+          # this repository alone. Upstream's release steps run on a PAT too.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           VERSION: ${{ inputs.version }}
         run: |
           # --target pins the tag to the commit that was actually built.
           # Without it the tag lands on the default branch's head, so a
           # dispatch from any other ref ships a binary that does not match the
           # source the tag names, which is what the AUR package builds from.
-          gh release create "$VERSION" \
-            --target "$GITHUB_SHA" \
-            --title "$VERSION" \
-            --notes "Zen with native tree-style tabs. Unofficial fork of zen-browser/desktop." \
-            ./zen.linux-x86_64.tar.xz
+          #
+          # If the release already exists (a re-run, or it was published by
+          # hand from this run's artifact), replace its tarball rather than
+          # failing on the duplicate tag.
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" --clobber ./zen.linux-x86_64.tar.xz
+          else
+            gh release create "$VERSION" \
+              --target "$GITHUB_SHA" \
+              --title "$VERSION" \
+              --notes "Zen with native tree-style tabs. Unofficial fork of zen-browser/desktop." \
+              ./zen.linux-x86_64.tar.xz
+          fi
 
   package:
     needs: build
@@ -235,6 +250,8 @@ jobs:
 
       - name: Attach to release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Same restriction as Publish release: uploading assets needs the
+          # PAT, not the workflow token.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           VERSION: ${{ inputs.version }}
-        run: gh release upload "$VERSION" ./*.deb ./*.rpm
+        run: gh release upload "$VERSION" --clobber ./*.deb ./*.rpm

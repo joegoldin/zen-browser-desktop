@@ -14,6 +14,11 @@ builds:
   include:
     - "packages.x86_64-linux.zen-browser-unwrapped"
 
+# A new push to the same branch cancels the older push's unfinished work.
+# A Firefox build holds a builder for hours, so without this a busy day queues
+# stale multi-hour builds behind each other.
+autoCancelSuperseded: true
+
 # `npm run lint` (mach lint zen) runs here rather than on GitHub, on the same
 # instance that already builds the browser. This backend's action schema has
 # only an "on: push" trigger and no branch filter, so every push to every
