@@ -8,8 +8,9 @@
 #
 # x86_64 only, and PGO off via ZEN_GA_DISABLE_PGO: the two-stage profile-
 # generation build runs under Xvfb and roughly doubles a build that already
-# takes hours. The runner is stock ubuntu-latest, so the 6 h job limit and the
-# runner's disk are both real constraints here.
+# takes hours. The build job runs on the erdtree self-hosted runner (an
+# ephemeral Ubuntu container capped at 18 CPUs / 64 GiB); the package job
+# stays on stock ubuntu-latest.
 #
 # No secrets beyond the automatic GITHUB_TOKEN. Upstream's equivalent passes
 # API keys for safebrowsing, location and Mozilla services, each guarded by a
@@ -30,14 +31,15 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, erdtree]
     env:
-      # Compilation cache, backed by the Actions cache. A cold build is around
-      # four hours, so the runs that benefit are the ones that follow a failure
-      # or a small patch fix. The repository cache is capped at 10 GB and a
-      # Firefox object cache will reach it, so expect eviction to blunt this on
-      # builds weeks apart; clear-all-cache.yml is there for when it goes stale.
-      SCCACHE_GHA_ENABLED: "true"
+      # Compilation cache on the runner's persistent local volume — unlike the
+      # GHA-backed cache this one isn't capped at 10 GB, so a full Firefox
+      # object cache survives between builds. clear-all-cache.yml still covers
+      # the Actions cache other workflows use; to clear THIS cache, wipe the
+      # gha-zen-sccache docker volume on erdtree.
+      SCCACHE_DIR: /opt/sccache
+      SCCACHE_CACHE_SIZE: 50G
       CARGO_INCREMENTAL: 0
     steps:
       # First, before anything expensive. The version is baked into the binary
@@ -52,11 +54,6 @@ jobs:
             echo "VERSION must look like 1.21.9b-tst.1, got: $VERSION" >&2
             exit 1
           fi
-
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -80,15 +77,6 @@ jobs:
         uses: mozilla-actions/sccache-action@main
         with:
           disable_annotations: true
-
-      # sccache reaches the Actions cache through these two, which are otherwise
-      # only visible to actions rather than to plain run: steps.
-      - name: Expose actions cache variables
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env['ACTIONS_CACHE_URL'])
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env['ACTIONS_RUNTIME_TOKEN'])
 
       # surfer initialises a git repo inside engine/ on a zen_browser branch and
       # commits the pristine source into it before patching. Without an identity

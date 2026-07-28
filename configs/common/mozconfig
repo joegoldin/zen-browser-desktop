@@ -26,7 +26,9 @@ export MOZ_INCLUDE_SOURCE_INFO=1
 
 ac_add_options --enable-application=browser
 
-if test "$SCCACHE_GHA_ENABLED" = "true"; then
+# GHA-cache-backed on hosted runners; local-dir (SCCACHE_DIR) on the erdtree
+# self-hosted runner, where the cache lives on a persistent docker volume.
+if test "$SCCACHE_GHA_ENABLED" = "true" || test -n "$SCCACHE_DIR"; then
   if test -x "$(command -v sccache)"; then
     ac_add_options --with-ccache=sccache
   elif test -f "$HOME/.mozbuild/sccache/sccache"; then
