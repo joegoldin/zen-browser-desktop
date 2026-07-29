@@ -67,8 +67,10 @@ fork build on top of upstream's `1.21.9b`.
   [release](https://github.com/joegoldin/zen-browser-desktop/releases). The deb
   and rpm install to `/opt/zen-tst` with a `/usr/bin/zen` symlink, and both
   declare `conflicts`/`provides` against `zen-browser`.
-- On Arch, `packaging/aur/PKGBUILD` builds a `zen-browser-tst-bin` package from
-  that tarball.
+- On Arch, install
+  [`zen-browser-tst-bin`](https://aur.archlinux.org/packages/zen-browser-tst-bin)
+  from the AUR. The release workflow keeps it in step with each release;
+  `packaging/aur/` here is its source.
 - On Nix, see below.
 
 ### Nix
