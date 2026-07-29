@@ -96,7 +96,13 @@ jobs:
         run: npm run surfer -- ci --brand release --display-version ${{ inputs.version }}
 
       - name: Download Firefox source
-        run: npm run download
+        run: |
+          # surfer's unpackFirefoxSource calls an async ensureDirectory for
+          # engine/ without awaiting it, so its tar -C engine races the mkdir.
+          # GitHub's runners win that race; the erdtree container's overlayfs
+          # loses it and tar dies on "Cannot open: No such file or directory".
+          mkdir -p engine
+          npm run download
 
       - name: Pin Rust toolchain
         run: |
