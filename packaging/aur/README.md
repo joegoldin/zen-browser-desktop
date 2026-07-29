@@ -20,5 +20,12 @@ and `${pkgver//_/-}` converts it back when building the download URL.
 
 ## sha256sums
 
-`SKIP` is a placeholder for the first build. Replace it with the real digest
-of the published tarball before submitting, and update it on every release.
+The first entry is the published tarball's digest and changes with every
+release; refresh it with `updpkgsums` (or `sha256sum` on the downloaded
+asset) whenever `pkgver` moves. The second is `zen.desktop`, which only
+changes if that file does.
+
+The tarball source is renamed to `$pkgname-$pkgver.tar.xz` because the
+release asset carries the same bare filename every version, and makepkg's
+source cache keys on the filename: without the rename, an upgrade silently
+reuses the previous release's cached tarball.
