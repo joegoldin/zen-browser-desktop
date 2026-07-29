@@ -235,14 +235,25 @@ jobs:
             else
               ver="$VERSION"; iter="1"
             fi
-            # No --depends yet. The AUR package declares gtk3, libxt,
-            # dbus-glib, nss, libpulse and friends, but those libraries are
-            # named differently on Debian and Fedora and were renamed again in
-            # Debian's time_t transition (libgtk-3-0 to libgtk-3-0t64), so
-            # naming them wrong makes the package refuse to install, which is
-            # worse than omitting them. Install the first real build on each
-            # target and declare what it actually turns out to be missing.
+            # The dependency list is what the 1.21.9b-tst.1 tarball measurably
+            # needed on a bare debian:12: install the deb, add exactly these
+            # five, and zen --version runs. Everything else ldd reports missing
+            # is Zen's own bundled libraries, resolved through the binary's
+            # runpath. The deb names carry | alternatives because Debian's
+            # time_t transition renamed the gtk and alsa packages on newer
+            # releases.
+            if [ "$target" = "rpm" ]; then
+              deps=(--depends gtk3 --depends alsa-lib --depends dbus-glib
+                    --depends libX11-xcb --depends libXtst)
+            else
+              deps=(--depends "libgtk-3-0 | libgtk-3-0t64"
+                    --depends "libasound2 | libasound2t64"
+                    --depends libdbus-glib-1-2
+                    --depends libx11-xcb1
+                    --depends libxtst6)
+            fi
             fpm -s dir -t "$target" \
+              "${deps[@]}" \
               -n zen-browser-tst \
               -v "$ver" \
               --iteration "$iter" \
