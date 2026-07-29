@@ -19,7 +19,7 @@ options=('!strip')
 # under the new version number.
 source=("$pkgname-$pkgver.tar.xz::https://github.com/joegoldin/zen-browser-desktop/releases/download/${pkgver//_/-}/zen.linux-x86_64.tar.xz"
         "zen.desktop")
-sha256sums=('68a49d300e18e17bb73447d7ed1fe9282c2881cc4b290840b6df511be3d10c1f'
+sha256sums=('bec9fa4053fb672e93fe8dc8de261adbf8ed2d4f91e273ce274dc7b3eb0974ef'
             '24d5b3c16139ba00e39fb62d6e7a7efddf21a4fecf294f5330e9198388ea0674')
 
 package() {
