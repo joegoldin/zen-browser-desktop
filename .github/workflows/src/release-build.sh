@@ -3,7 +3,9 @@
 set -xe
 
 if command -v apt-get &> /dev/null; then
-  sudo apt-get install python3-launchpadlib
+  # -y matters: on a runner whose image does not already carry this package's
+  # dependency set, apt prompts, finds no TTY, and aborts the whole build.
+  sudo apt-get install -y python3-launchpadlib
   sudo apt-get update
   sudo apt-get install -y xvfb libnvidia-egl-wayland1 mesa-utils libgl1-mesa-dri
 fi
