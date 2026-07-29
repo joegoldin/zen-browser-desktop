@@ -325,8 +325,11 @@ jobs:
           chown -R builder .
           # updpkgsums downloads the sources and rewrites every checksum, so
           # the tarball digest and zen.desktop stay correct together.
-          runuser -u builder -- updpkgsums
-          runuser -u builder -- sh -c 'makepkg --printsrcinfo > .SRCINFO'
+          # runuser keeps the caller's environment, including HOME, which in a
+          # container job is root's /github/home; give makepkg the builder's
+          # own writable home instead.
+          runuser -u builder -- env HOME=/home/builder updpkgsums
+          runuser -u builder -- env HOME=/home/builder sh -c 'makepkg --printsrcinfo > .SRCINFO'
           grep -E "pkgver|sha256" .SRCINFO | head -4
 
       - name: Push to the AUR
@@ -336,13 +339,19 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$AUR_SSH_KEY" > ~/.ssh/aur && chmod 600 ~/.ssh/aur
+          # Absolute paths throughout: the step shell is POSIX sh, which does
+          # not tilde-expand after an =, so a literal ~ reaches ssh — and ssh
+          # expands it from the passwd entry (/root), not from the HOME this
+          # container job actually runs with (/github/home). The two disagree,
+          # ssh reads a known_hosts that was never written, and host key
+          # verification fails.
+          mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$AUR_SSH_KEY" > "$HOME/.ssh/aur" && chmod 600 "$HOME/.ssh/aur"
           # Pinned rather than keyscanned at run time: this is the AUR's
           # published ed25519 host key, and a CI job is exactly where
           # trust-on-first-use is worthless.
-          echo "aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN" > ~/.ssh/known_hosts
-          export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o UserKnownHostsFile=~/.ssh/known_hosts"
+          echo "aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN" > "$HOME/.ssh/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
           # Cloning a package that does not exist yet yields an empty repo;
           # the first push is what creates it.
           git clone "ssh://aur@aur.archlinux.org/zen-browser-tst-bin.git" /tmp/aur
