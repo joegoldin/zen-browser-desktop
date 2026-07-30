@@ -99,10 +99,22 @@ jobs:
             title="Upstream sync ($BRANCH)"
             body=$'Merged cleanly. A clean textual merge of a .patch file can still produce a patch that no longer applies; garnix lints this branch, which catches that, because linting needs the import to have succeeded first.\n\nThe mochitests are not automated. Run them before merging:\n\n```\ndevenv shell -- bash -c "npm test -- tab-tree --headless"\ndevenv shell -- bash -c "npm test -- window_sync --headless"\ndevenv shell -- bash -c "npm test -- space_routing --headless"\n```'
           fi
-          # A re-run after a failure reuses the same branch, so a PR may already
-          # be open against it. Updating it is right; failing is not.
-          if gh pr view "$BRANCH" --json number >/dev/null 2>&1; then
-            gh pr edit "$BRANCH" --title "$title" --body "$body"
+          # REST rather than gh pr create: that command drives the GraphQL
+          # createPullRequest mutation, which refuses fine-grained personal
+          # access tokens ("Resource not accessible by personal access
+          # token") even when the token holds Pull requests read/write. The
+          # REST endpoint honors the same token without complaint, which is
+          # also why the release steps work.
+          #
+          # A re-run after a failure reuses the same branch, so a PR may
+          # already be open against it. Updating it is right; failing is not.
+          existing=$(gh api "repos/${{ github.repository }}/pulls?head=${{ github.repository_owner }}:$BRANCH&state=open" -q '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/pulls/$existing" \
+              -f title="$title" -f body="$body" > /dev/null
+            echo "updated PR #$existing"
           else
-            gh pr create --base dev --head "$BRANCH" --title "$title" --body "$body"
+            gh api -X POST "repos/${{ github.repository }}/pulls" \
+              -f title="$title" -f body="$body" \
+              -f head="$BRANCH" -f base=dev -q .html_url
           fi
