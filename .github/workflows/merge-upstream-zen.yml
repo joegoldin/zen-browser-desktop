@@ -82,7 +82,13 @@ jobs:
       - name: Open PR
         if: steps.merge.outputs.empty == 'false'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The workflow token cannot create pull requests on this repository:
+          # createPullRequest answers "Resource not accessible by integration"
+          # with pull-requests:write granted and with the "allow Actions to
+          # create and approve pull requests" repo setting on, the same way
+          # release creation refuses it. RELEASE_TOKEN needs the Pull requests
+          # read/write permission for this step.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           CONFLICT: ${{ steps.merge.outputs.conflict }}
           BRANCH: ${{ steps.merge.outputs.branch }}
         run: |
