@@ -15,6 +15,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   ZenSessionStore: "resource:///modules/zen/ZenSessionManager.sys.mjs",
   TabStateCache: "resource:///modules/sessionstore/TabStateCache.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
+  clearTimeout: "resource://gre/modules/Timer.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
   RunState: "resource:///modules/sessionstore/RunState.sys.mjs",
 });
@@ -1072,6 +1073,7 @@ class nsZenWindowSync {
           this.#maybeRemovePseudoImageForBrowser(ourBrowser);
           ourBrowser.focus();
           resolve();
+          this.#scheduleStalePseudoImageCleanup(aOtherTab);
         });
         return;
       }
@@ -1079,6 +1081,63 @@ class nsZenWindowSync {
       this.#maybeRemovePseudoImageForBrowser(ourBrowser);
       resolve();
     });
+  }
+
+  /**
+   * A browser we just swapped content out of is masked with a frozen
+   * screenshot (zen-pseudo-hidden + .zen-pseudo-browser-image) so the
+   * transition to about:blank doesn't flash. That mask is otherwise only
+   * cleared the next time this same browser becomes the *receiving* side of
+   * a future swap (see #styleSwapedBrowsers above) - which may never happen
+   * if the user doesn't switch back to this window/tab through window-sync.
+   * When it doesn't, the stale screenshot is left in place indefinitely,
+   * hiding whatever the browser loads next (e.g. a direct URL bar
+   * navigation, which bypasses window-sync entirely) behind a frozen image
+   * of the page it used to show. Lift the mask unconditionally after the
+   * transition has had time to settle so it can never get stuck like that.
+   * The pending cleanup is cancelled (not just skipped) on tab close or
+   * window unload so it can't outlive - and touch a torn-down or since
+   * recycled - browser, e.g. during test teardown.
+   *
+   * @param {object} aTab - The tab whose browser was just masked.
+   */
+  #scheduleStalePseudoImageCleanup(aTab) {
+    const browser = aTab.linkedBrowser;
+    if (!browser) {
+      return;
+    }
+    const generation = (browser._zenPseudoMaskGeneration ?? 0) + 1;
+    browser._zenPseudoMaskGeneration = generation;
+    const win = aTab.ownerGlobal;
+    let timerId;
+    const cancel = () => {
+      lazy.clearTimeout(timerId);
+      win.removeEventListener("TabClose", onTabClose);
+      win.removeEventListener("unload", cancel);
+    };
+    const onTabClose = event => {
+      if (event.target === aTab) {
+        cancel();
+      }
+    };
+    win.addEventListener("TabClose", onTabClose);
+    win.addEventListener("unload", cancel, { once: true });
+    timerId = lazy.setTimeout(() => {
+      cancel();
+      // Bail if this browser has since been masked again by a newer swap
+      // (either cleaned up already via the receiving-side path, or a fresh
+      // mask that shouldn't be torn down early), or if the tab/window went
+      // away without firing the events above.
+      if (
+        browser._zenPseudoMaskGeneration !== generation ||
+        aTab.closing ||
+        win.closed
+      ) {
+        return;
+      }
+      browser.removeAttribute("zen-pseudo-hidden");
+      this.#maybeRemovePseudoImageForBrowser(browser);
+    }, 500);
   }
 
   /**
