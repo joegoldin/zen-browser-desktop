@@ -15,6 +15,14 @@ across a restart. Everything else is stock Zen, tracking upstream `dev`.
 
 ---
 
+> [!WARNING]
+>  ### Disclaimer
+>
+>  This fork is provided "as is", without warranty of any kind. It it "works on my machine", but no guarantees! Use at your own risk. The author(s) accept no liability for any damage, data loss, or other issues arising from its use.
+>
+> That said, I hope you enjoy! Please post an issue if you have any problems with tree-style-tabs.
+
+> [!IMPORTANT]
 > ### Unofficial fork
 >
 > A fork of [zen-browser/desktop](https://github.com/zen-browser/desktop), not
