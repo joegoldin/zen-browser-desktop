@@ -135,6 +135,12 @@
         "zen.tab-tree.drag-reorder-edge",
         15
       );
+      XPCOMUtils.defineLazyPreferenceGetter(
+        this,
+        "_treeNestZone",
+        "zen.tab-tree.drag-nest-zone",
+        40
+      );
 
       ChromeUtils.defineESModuleGetters(
         this,
@@ -974,13 +980,22 @@
       // arms split (you can't split into an existing split), and only after a
       // deliberate hold; everywhere else stays a tree action.
       const canNest = treeOk && tree.isTreeEligible(targetNode);
-      // Left of the (indented) target row means dragging shallower: un-nest via a
-      // reorder line instead of nesting under the target, so the drop matches the
-      // indicator no matter where in the row you release.
-      const unNest = canNest && clientX < rect.x - 2;
+      // The strip's left band is reserved for plain vertical reordering: while the
+      // cursor is in it, show a reorder line instead of nesting under the target,
+      // so a drop that just moves a tab never needs an edge-hug (which would arm a
+      // space switch). Nesting takes a deliberate drag past the threshold.
+      const unNest =
+        canNest &&
+        clientX <
+          this.#nestThresholdX(
+            rect.left - tree.getLevel(targetNode) * this._treeIndentStep,
+            rect.right
+          );
       const splitZone = this._treeSplitZone / 100;
       // Either horizontal edge zone arms a split: left puts the dragged tab on
-      // the left, right on the right; the middle stays a nest.
+      // the left, right on the right; the middle stays a nest. This overlaps the
+      // reorder band on the left, which is fine — a split only escalates after a
+      // deliberate hold, so a moving drag through it still just reorders.
       const inLeftZone = clientX < rect.x + rect.width * splitZone;
       const inRightZone = clientX > rect.x + rect.width * (1 - splitZone);
       const inSplitZone = inLeftZone || inRightZone;
@@ -1052,6 +1067,13 @@
       this._clearDragOverReorder();
     }
 
+    // X past which a drag may go deeper. Everything left of it is the reorder
+    // band, measured across the strip's full (level-0) row width so it doesn't
+    // shift around as you hover rows at different depths.
+    #nestThresholdX(level0Left, rightEdge) {
+      return level0Left + (rightEdge - level0Left) * (this._treeNestZone / 100);
+    }
+
     // Re-indent the existing native drop indicator to the level the dragged node
     // will land at, so there's a single accurate line rather than a second one.
     #setNativeIndicatorIndent(level0Left, level, rightEdge) {
@@ -1066,9 +1088,9 @@
     }
 
     // Reorder: the native drag already placed its line in the gap; shift only its
-    // indent to the level chosen by the cursor's horizontal position. Default is
-    // a sibling of the node above the gap; drag right to nest under it, left to
-    // outdent toward root level 0.
+    // indent to the level chosen by the cursor's horizontal position. Anywhere in
+    // the strip's left band the drop stays as shallow as the neighbors allow;
+    // drag right past the nest threshold to go one level deeper per indent step.
     #updateReorderIndicator(node, before, clientX, draggedNodes, forceLevel) {
       const tree = window.gZenTabTree;
       let prev = before ? node.previousElementSibling : node;
@@ -1082,22 +1104,32 @@
         next = next.nextElementSibling;
       }
       const indentStep = this._treeIndentStep;
-      const { minLevel, maxLevel, prevLevel } = tree.reorderLevelRange(
-        prev,
-        next
-      );
+      const range = tree.reorderLevelRange(prev, next);
+      const { prevLevel } = range;
+      // A drop never goes deeper than one level under the row being hovered, even
+      // when the tab above the gap sits further in: hovering a root row that
+      // follows a deep branch must not let the indicator dive into that branch.
+      const maxLevel = Math.min(range.maxLevel, tree.getLevel(node) + 1);
+      const minLevel = Math.min(range.minLevel, maxLevel);
       let level = prevLevel;
       if (prev) {
         const prevRect = window.windowUtils.getBoundsWithoutFlushing(prev);
-        // forceLevel pins the level (e.g. root, when dragging below the list);
-        // otherwise anchor "sibling" at the tab-above's content so hovering its
-        // row keeps the sibling level, a clear drag right nests, left outdents.
-        const steps =
-          forceLevel != null
-            ? forceLevel - prevLevel
-            : Math.round((clientX - (prevRect.x + indentStep)) / indentStep);
-        level = Math.max(minLevel, Math.min(prevLevel + steps, maxLevel));
         const level0Left = prevRect.left - prevLevel * indentStep;
+        if (forceLevel != null) {
+          // forceLevel pins the level (e.g. root, when dragging below the list).
+          level = forceLevel;
+        } else {
+          // The whole left band resolves to the shallowest level the neighbors
+          // allow, so a plain vertical move has most of the strip to work with;
+          // past the threshold each further indent step goes one level deeper.
+          const nestStart = this.#nestThresholdX(level0Left, prevRect.right);
+          const steps =
+            clientX < nestStart
+              ? 0
+              : Math.floor((clientX - nestStart) / indentStep) + 1;
+          level = minLevel + steps;
+        }
+        level = Math.max(minLevel, Math.min(level, maxLevel));
         this.#setNativeIndicatorIndent(level0Left, level, prevRect.right);
       }
       // Remember the resolved anchor + level so the drop lands exactly here.

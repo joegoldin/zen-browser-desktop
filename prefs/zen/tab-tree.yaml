@@ -27,5 +27,11 @@
 - name: zen.tab-tree.drag-reorder-edge
   value: 15 # top/bottom % of a tab that reorders; the rest of the row nests
 
+# Leftmost % of the tab strip reserved for plain vertical reorder: nesting only
+# starts past it, so dropping a tab without nesting never needs an edge-hug (which
+# would arm a space switch instead).
+- name: zen.tab-tree.drag-nest-zone
+  value: 40
+
 - name: zen.tabs.middle-drag-select.enabled
   value: true
