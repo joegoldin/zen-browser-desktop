@@ -22,6 +22,7 @@ across a restart. Everything else is stock Zen, tracking upstream `dev`.
 >
 > That said, I hope you enjoy! Please post an issue if you have any problems with tree-style-tabs.
 
+<<<<<<< HEAD
 > [!IMPORTANT]
 > ### Unofficial fork
 >
@@ -173,6 +174,10 @@ Conflicts concentrate in four `.patch` files plus `surfer.json`, because a
 Firefox bump shifts the line numbers every hunk header refers to. The
 resolution procedure, the regression gate, and the measured test baselines are
 in [docs/fork-maintenance.md](./docs/fork-maintenance.md).
+=======
+- [`Release`](https://zen-browser.app/download) - Is currently built using Firefox version `153.0.3`! 🚀
+- [`Twilight`](https://zen-browser.app/download?twilight) - Is currently built using Firefox version `RC 153.0.3`!
+>>>>>>> upstream/dev
 
 ### Contributing
 
