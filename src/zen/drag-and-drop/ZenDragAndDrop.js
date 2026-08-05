@@ -112,6 +112,12 @@
       );
       XPCOMUtils.defineLazyPreferenceGetter(
         this,
+        "_dndSwitchSpaceEnabled",
+        "zen.workspaces.dnd-switch-enabled",
+        false
+      );
+      XPCOMUtils.defineLazyPreferenceGetter(
+        this,
         "_dndSwitchSpaceDelay",
         "zen.tabs.dnd-switch-space-delay",
         1000
@@ -733,7 +739,10 @@
     }
 
     #shouldSwitchSpace(event) {
-      if (document.documentElement.hasAttribute("customizing")) {
+      if (
+        !this._dndSwitchSpaceEnabled ||
+        document.documentElement.hasAttribute("customizing")
+      ) {
         return { isNearLeftEdge: false, isNearRightEdge: false };
       }
 

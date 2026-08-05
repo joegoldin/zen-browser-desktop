@@ -35,6 +35,12 @@
 - name: zen.workspaces.separate-essentials
   value: true
 
+# Holding a dragged tab against the left/right edge of the tab strip switches
+# Space. Off in this fork: the edges are where a tree drag reorders without
+# nesting, and mouse back/forward buttons already switch Space.
+- name: zen.workspaces.dnd-switch-enabled
+  value: false
+
 - name: zen.workspaces.dnd-switch-padding
   value: 20
 

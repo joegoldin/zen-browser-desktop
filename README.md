@@ -62,6 +62,17 @@ module.
 
 Moving a tab into a Space adopts that Space's container.
 
+#### Space switching on drag, off by default
+
+Upstream switches Space when you hold a dragged tab against the left or right
+edge of the tab strip. Those edges are also where a tree drag reorders a tab
+without nesting it, and a mouse with back/forward buttons already switches
+Space, so the gesture fires when you did not ask for it. This fork ships it
+disabled. Set `zen.workspaces.dnd-switch-enabled` to `true` in `about:config`
+to get upstream's behaviour back; `zen.workspaces.dnd-switch-padding` (edge
+width in px) and `zen.tabs.dnd-switch-space-delay` (hold in ms) still tune it.
+Dragging a tab onto a Space icon switches Space either way.
+
 #### A Nix flake
 
 Builds Zen from source with `buildMozillaMach`, described below.
