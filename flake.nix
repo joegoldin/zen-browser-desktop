@@ -3,10 +3,15 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
-    # Firefox 153 outruns nixos-26.05 on two build inputs: configure refuses
-    # cbindgen below 0.29.4 (the pin has 0.29.2) and nss below 3.125 (the pin's
-    # nss_latest is 3.124). Take just those two from a newer nixpkgs rather than
-    # moving the whole toolchain. Both can go once the main pin catches up.
+    # Firefox 153 outruns nixos-26.05 on three build inputs: configure refuses
+    # cbindgen below 0.29.4 (the pin has 0.29.2), nss below 3.125 (the pin's
+    # nss_latest is 3.124), and — on macOS — an Apple SDK below 26.5, where the
+    # pin's apple-sdk_26 is 26.4. That last one is not a matter of waiting:
+    # nixpkgs bumped apple-sdk_26 to 26.5 in a81408d1 (2026-05-17), after the
+    # 26.05 branch-off, and never backported it, so both nixos-26.05 and
+    # nixpkgs-26.05-darwin are stuck at 26.4 for the life of the release. Take
+    # just these three from a newer nixpkgs rather than moving the whole
+    # toolchain. All three can go once the main pin catches up.
     nixpkgs-newer.url = "github:NixOS/nixpkgs/7525d999cd850b9a488817abc89c75dc733acf17";
   };
 
@@ -23,8 +28,15 @@
 
       # An overlay rather than extraNativeBuildInputs entries: buildMozillaMach
       # (and mach's own configure, which the lint app also runs) reach for
-      # rust-cbindgen and nss_latest themselves, so they have to be replaced at
-      # the pkgs level for configure to see the newer ones.
+      # rust-cbindgen, nss_latest and apple-sdk_26 themselves, so they have to
+      # be replaced at the pkgs level for configure to see the newer ones.
+      #
+      # apple-sdk_26 is swapped on every system rather than just Darwin: the
+      # attribute is defined unconditionally in nixpkgs, and buildMozillaMach
+      # only forces it inside its own `isDarwin` branch, so a Linux eval never
+      # touches it. Mixing this one derivation across nixpkgs revisions is safe
+      # because apple-sdk's setup-hooks/ and package.nix are byte-identical
+      # between the two pins; only the SDK version metadata differs.
       pkgsFor =
         system:
         import nixpkgs {
@@ -34,6 +46,7 @@
               inherit (nixpkgs-newer.legacyPackages.${system})
                 rust-cbindgen
                 nss_latest
+                apple-sdk_26
                 ;
             })
           ];
