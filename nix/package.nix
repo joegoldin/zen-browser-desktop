@@ -4,6 +4,7 @@
 # buildMozillaMach rather than Zen's own `surfer` tool.
 {
   lib,
+  apple-sdk_26,
   buildMozillaMach,
   callPackage,
   stdenv,
@@ -49,6 +50,14 @@ let
       {
         crashreporterSupport = false;
         enableOfficialBranding = false;
+        # Firefox >= 145 asks buildMozillaMach for apple-sdk_26, and configure
+        # rejects anything below 26.5 ("SDK version 26.4 is too old"), which is
+        # exactly what nixos-26.05 pins. The flake hands us a 26.5 build of it;
+        # overriding here rather than in an overlay keeps the swap scoped to
+        # this derivation instead of rebuilding the ~450 Darwin packages that
+        # also reference apple-sdk_26. Inert on Linux, where the SDK is never
+        # forced.
+        inherit apple-sdk_26;
         # ltoSupport + pgoSupport stay at buildMozillaMach's defaults (true on
         # x86_64-linux): PGO gives profile-guided optimization, and ltoSupport wires
         # up the LLVM/lld bintools. We only change the LTO *mode* below.

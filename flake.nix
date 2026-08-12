@@ -28,15 +28,8 @@
 
       # An overlay rather than extraNativeBuildInputs entries: buildMozillaMach
       # (and mach's own configure, which the lint app also runs) reach for
-      # rust-cbindgen, nss_latest and apple-sdk_26 themselves, so they have to
-      # be replaced at the pkgs level for configure to see the newer ones.
-      #
-      # apple-sdk_26 is swapped on every system rather than just Darwin: the
-      # attribute is defined unconditionally in nixpkgs, and buildMozillaMach
-      # only forces it inside its own `isDarwin` branch, so a Linux eval never
-      # touches it. Mixing this one derivation across nixpkgs revisions is safe
-      # because apple-sdk's setup-hooks/ and package.nix are byte-identical
-      # between the two pins; only the SDK version metadata differs.
+      # rust-cbindgen and nss_latest themselves, so they have to be replaced at
+      # the pkgs level for configure to see the newer ones.
       pkgsFor =
         system:
         import nixpkgs {
@@ -46,7 +39,6 @@
               inherit (nixpkgs-newer.legacyPackages.${system})
                 rust-cbindgen
                 nss_latest
-                apple-sdk_26
                 ;
             })
           ];
@@ -62,6 +54,30 @@
           # referenced (locally: the checkout; from dotfiles: the pinned rev).
           zen-browser-unwrapped = pkgs.callPackage ./nix/package.nix {
             zen-src-tree = self;
+            # The 26.5 SDK macOS needs, built by the *pinned* nixpkgs rather
+            # than taken from nixpkgs-newer wholesale: apple-sdk's package.nix
+            # and setup-hooks/ are byte-identical between the two pins, so
+            # calling the newer file (which carries the newer
+            # metadata/versions.json) against our own package set yields 26.5
+            # without dragging a second nixpkgs' stdenv, libiconv and
+            # compiler-rt into the closure.
+            #
+            # Deliberately passed here rather than added to the overlay above.
+            # Much of the Darwin package set depends on apple-sdk_26 even
+            # though the stdenv's own default SDK is 14.4, so overlaying it
+            # rebuilds ~450 packages — cups, gnutls, unbound, sphinx and the
+            # rest of Firefox's Darwin buildInputs — from source with no cache
+            # hits. Scoped to this derivation (nix/package.nix forwards it into
+            # buildMozillaMach's `.override`), only Zen itself rebuilds, and
+            # its dependencies keep their cached 26.4-built outputs. That mix
+            # is fine: the SDK version governs the headers and stubs each
+            # package is compiled against, not a shared ABI.
+            #
+            # Never forced on Linux, where buildMozillaMach only reaches for
+            # the SDK inside its own `isDarwin` branch.
+            apple-sdk_26 = pkgs.callPackage "${nixpkgs-newer}/pkgs/by-name/ap/apple-sdk/package.nix" {
+              darwinSdkMajorVersion = "26";
+            };
           };
         in
         {
