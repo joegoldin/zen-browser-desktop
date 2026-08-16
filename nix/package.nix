@@ -82,14 +82,23 @@ base.overrideAttrs (old: {
   # The real directory is discovered rather than named, because what
   # buildMozillaMach calls it varies with the nixpkgs it comes from: both
   # lib/zen and lib/zen-<version> occur.
-  postInstall = (old.postInstall or "") + ''
-    appdir=$(find "$out/lib" -mindepth 1 -maxdepth 1 -type d \
-      -exec test -e '{}/zen' \; -print -quit)
-    if [ -n "$appdir" ]; then
-      ln -sn "$(basename "$appdir")" "$out/lib/zen-bin-${zen-browser-src.zen-version}"
-    else
-      echo "no application directory under $out/lib; the sine shim is stale" >&2
-      exit 1
-    fi
-  '';
+  #
+  # Linux only: on Darwin buildMozillaMach installs an app bundle to
+  # $out/Applications/Zen.app and never creates $out/lib at all, so the find
+  # below aborts the install with "No such file or directory". Nothing is lost
+  # by skipping it — the home-manager module asserts sine.enable is
+  # unsupported on macOS (it would break the bundle's code signature), so the
+  # glob this shim feeds is never run there.
+  postInstall =
+    (old.postInstall or "")
+    + lib.optionalString stdenv.hostPlatform.isLinux ''
+      appdir=$(find "$out/lib" -mindepth 1 -maxdepth 1 -type d \
+        -exec test -e '{}/zen' \; -print -quit)
+      if [ -n "$appdir" ]; then
+        ln -sn "$(basename "$appdir")" "$out/lib/zen-bin-${zen-browser-src.zen-version}"
+      else
+        echo "no application directory under $out/lib; the sine shim is stale" >&2
+        exit 1
+      fi
+    '';
 })
