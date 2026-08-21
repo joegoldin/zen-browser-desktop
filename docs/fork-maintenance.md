@@ -36,7 +36,7 @@ The fork keeps Zen's name, icons, `appId` and `binaryName`. It is a drop-in
 replacement, and an existing Zen profile opens in it unchanged. Two
 consequences follow:
 
-The AUR, deb and rpm packages install to the same `/usr/bin/zen`, so each one
+The deb and rpm packages install to the same `/usr/bin/zen`, so each one
 declares `conflicts` and `provides` against `zen-browser`. Without that,
 installs fail in a way that looks like a packaging bug.
 
