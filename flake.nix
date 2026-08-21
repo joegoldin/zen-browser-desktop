@@ -3,10 +3,10 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
-    # Firefox 153 outruns nixos-26.05 on two build inputs: configure refuses
-    # cbindgen below 0.29.4 (the pin has 0.29.2) and nss below 3.125 (the pin's
-    # nss_latest is 3.124). Take just those two from a newer nixpkgs rather than
-    # moving the whole toolchain. Both can go once the main pin catches up.
+    # Two build inputs configure is strict about: cbindgen below 0.29.4 and,
+    # on Firefox 154, nss below 3.126. nixos-26.05 lagged both when this was
+    # written, so they come from a newer nixpkgs rather than moving the whole
+    # toolchain. It now ships 0.29.4 and 3.126, so this can go.
     nixpkgs-newer.url = "github:NixOS/nixpkgs/7525d999cd850b9a488817abc89c75dc733acf17";
   };
 

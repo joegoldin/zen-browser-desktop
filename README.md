@@ -147,10 +147,10 @@ it before.
 fetched source always matches the base the patches target. The source hash next
 to it is pinned by hand and has to move with it.
 
-Two build inputs outrun `nixos-26.05` on Firefox 153 and come from a newer
-nixpkgs through an overlay in `flake.nix`: `rust-cbindgen` (configure refuses
-below 0.29.4) and `nss_latest` (below 3.125). Both can go once the main pin
-catches up.
+An overlay in `flake.nix` takes `rust-cbindgen` and `nss_latest` from a newer
+nixpkgs, because `nixos-26.05` once lagged the versions configure demands
+(0.29.4 and, on Firefox 154, 3.126). The pin has since caught up on both, so
+the overlay is vestigial and can go.
 
 `devenv.nix` provides the development shell that `mach` and `npm run lint`
 need. Two details in it are load-bearing: jemalloc is filtered off
