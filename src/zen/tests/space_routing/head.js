@@ -12,7 +12,7 @@ const { gZenManagedSpaces } = ChromeUtils.importESModule(
 );
 
 const { ContextualIdentityService } = ChromeUtils.importESModule(
-  "resource://gre/modules/ContextualIdentityService.sys.mjs"
+  "moz-src:///toolkit/components/contextualidentity/ContextualIdentityService.sys.mjs"
 );
 
 async function withManagedSpaces(json, fn) {

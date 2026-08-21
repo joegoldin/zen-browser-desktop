@@ -31,6 +31,7 @@ add_task(async function test_TabOpenInContainer() {
   await SpecialPowers.pushPrefEnv({
     set: [["privacy.userContext.enabled", true]],
   });
+  const initialTabs = new Set(gBrowser.tabs);
   let newTab = null;
   await withNewSyncedWindow(async win => {
     await runSyncAction(
@@ -57,10 +58,18 @@ add_task(async function test_TabOpenInContainer() {
           "The synced tab should inherit the original tab's container"
         );
       },
-      "TabOpen"
+      "TabOpen",
+      aEvent => aEvent.target === newTab
     );
   });
-  let tabClosing = BrowserTestUtils.waitForTabClosing(newTab);
-  BrowserTestUtils.removeTab(newTab);
-  await tabClosing;
+  // Window sync mirrors the synced window's blank tab into this one, so the
+  // opened tab is not the only one left behind.
+  const closing = [];
+  for (const tab of [...gBrowser.tabs]) {
+    if (!initialTabs.has(tab) && !tab.closing) {
+      closing.push(BrowserTestUtils.waitForTabClosing(tab));
+      BrowserTestUtils.removeTab(tab);
+    }
+  }
+  await Promise.all(closing);
 });

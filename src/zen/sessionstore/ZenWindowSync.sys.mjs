@@ -1553,7 +1553,6 @@ class nsZenWindowSync {
       const newTab = win.gBrowser.addTrustedTab("about:blank", {
         animate: true,
         createLazyBrowser: true,
-        userContextId: tab.userContextId,
         _forZenEmptyTab: tab.hasAttribute("zen-empty-tab"),
         // Mirror the source tab's container. Without this the synced tab is
         // created with no container, and getContextIdIfNeeded() fills it from
