@@ -10,36 +10,29 @@ XPCOMUtils.defineLazyPreferenceGetter(
   lazy,
   "dragRegionHeightPercentage",
   "zen.view.drag-window-from-content.height-percentage",
-  30
+  10
 );
 
-// A small threshold to allow for minor mouse jitter during a normal click.
-// Anything beyond this is considered an intentional window drag.
+XPCOMUtils.defineLazyServiceGetter(
+  lazy,
+  "zenWindowDragUtils",
+  "@mozilla.org/zen/window-drag-utils;1",
+  Ci.nsIZenWindowDragUtils
+);
+
+// Movement below this is considered a click, not a window drag. Fast
+// clicks commonly slide a few pixels (especially on trackpads), and once
+// the native move starts the OS swallows the mouseup — so keep this
+// comfortably above click jitter or clicks in the region get lost.
 const DRAG_START_THRESHOLD_PX = 4;
 
-const kInteractiveTags = new Set([
-  "a",
-  "area",
-  "audio",
-  "button",
-  "canvas",
-  "details",
-  "dialog",
-  "embed",
-  "frame",
-  "iframe",
-  "img",
-  "input",
-  "label",
-  "menu",
-  "object",
-  "optgroup",
-  "option",
-  "select",
-  "summary",
-  "textarea",
-  "video",
-]);
+// Un-snapping a maximized or tiled window is more disruptive, so those
+// need a firmer gesture, mirroring how native titlebars behave.
+const SNAPPED_DRAG_START_THRESHOLD_PX = 50;
+
+// Content that drives its own mouse interaction without being
+// interactive HTML content in the spec sense.
+const kAppContentTags = new Set(["audio", "canvas", "video"]);
 
 const kInteractiveRoles = new Set([
   "button",
@@ -65,33 +58,6 @@ const kInteractiveRoles = new Set([
   "treegrid",
 ]);
 
-// Cursors that signal the page considers the area interactive or draggable.
-const kInteractiveCursors = new Set([
-  "pointer",
-  "grab",
-  "grabbing",
-  "move",
-  "all-scroll",
-  "text",
-  "vertical-text",
-  "cell",
-  "crosshair",
-  "col-resize",
-  "row-resize",
-  "n-resize",
-  "e-resize",
-  "s-resize",
-  "w-resize",
-  "ne-resize",
-  "nw-resize",
-  "se-resize",
-  "sw-resize",
-  "ew-resize",
-  "ns-resize",
-  "nesw-resize",
-  "nwse-resize",
-]);
-
 const kGestureListenerOptions = { mozSystemGroup: true, capture: true };
 
 const kGestureEvents = ["mousemove", "mouseup", "dragstart", "unload"];
@@ -101,6 +67,9 @@ export class ZenWindowDragChild extends JSWindowActorChild {
   #dragging = false;
   #startScreenX = 0;
   #startScreenY = 0;
+  // 0 while waiting for the ZenWindowDrag:IsSnapped answer; no drag can
+  // start until the proper threshold is known.
+  #dragThresholdPx = 0;
 
   handleEvent(event) {
     // Never let pages spoof the gesture with synthetic events.
@@ -183,8 +152,18 @@ export class ZenWindowDragChild extends JSWindowActorChild {
     const { screenX, screenY } = this.#screenPoint(event);
     this.#startScreenX = screenX;
     this.#startScreenY = screenY;
+    this.#dragThresholdPx = 0;
     this.#tracking = true;
     this.#addGestureListeners();
+    this.sendQuery("ZenWindowDrag:IsSnapped")
+      .then(snapped => {
+        if (this.#tracking) {
+          this.#dragThresholdPx = snapped
+            ? SNAPPED_DRAG_START_THRESHOLD_PX
+            : DRAG_START_THRESHOLD_PX;
+        }
+      })
+      .catch(() => this.#reset());
   }
 
   #onMouseMove(event) {
@@ -202,9 +181,12 @@ export class ZenWindowDragChild extends JSWindowActorChild {
       event.preventDefault();
       return;
     }
+    if (!this.#dragThresholdPx) {
+      return;
+    }
     const point = this.#screenPoint(event);
     const threshold =
-      DRAG_START_THRESHOLD_PX * this.contentWindow.devicePixelRatio;
+      this.#dragThresholdPx * this.contentWindow.devicePixelRatio;
     if (
       Math.hypot(
         point.screenX - this.#startScreenX,
@@ -267,8 +249,13 @@ export class ZenWindowDragChild extends JSWindowActorChild {
     if (event.originalTarget?.isNativeAnonymous) {
       return true;
     }
-    let target = event.composedTarget;
+    let target = event.explicitOriginalTarget;
     if (target?.nodeType === Node.TEXT_NODE) {
+      // The hit-test landed on rendered text; a drag here should select
+      // it instead, unless it isn't selectable.
+      if (this.#isSelectableText(target)) {
+        return true;
+      }
       target = target.parentElement;
     }
     if (!target || target.nodeType !== Node.ELEMENT_NODE) {
@@ -282,21 +269,32 @@ export class ZenWindowDragChild extends JSWindowActorChild {
         return true;
       }
     }
-    return this.#hasInteractiveCursor(target);
+    // The effective cursor, resolved the same way it is shown to the user.
+    return lazy.zenWindowDragUtils.isInteractiveCursor(
+      event.composedTarget,
+      event.clientX,
+      event.clientY
+    );
+  }
+
+  #isSelectableText(node) {
+    const parent = node.parentElement;
+    return (
+      !parent ||
+      this.contentWindow.getComputedStyle(parent).userSelect !== "none"
+    );
   }
 
   #isInteractiveElement(element) {
-    if (kInteractiveTags.has(element.localName)) {
+    // Gecko's own notion of interactive, editable or draggable content.
+    if (lazy.zenWindowDragUtils.isInteractiveContent(element)) {
       return true;
     }
-    // Covers [draggable="true"] and elements draggable by default,
-    // like links and images.
-    if (element.draggable) {
+    if (kAppContentTags.has(element.localName)) {
       return true;
     }
-    if (element.isContentEditable) {
-      return true;
-    }
+    // Declarative signals the engine check doesn't cover: ARIA widget
+    // roles and explicit tab stops.
     if (
       element.tabIndex >= 0 &&
       element !== this.document.body &&
@@ -305,29 +303,6 @@ export class ZenWindowDragChild extends JSWindowActorChild {
       return true;
     }
     const role = element.getAttribute?.("role");
-    if (role && kInteractiveRoles.has(role.toLowerCase())) {
-      return true;
-    }
-    // Inline event handlers are a strong hint of a custom widget.
-    if (
-      element.onclick ||
-      element.onmousedown ||
-      element.onpointerdown ||
-      element.ondragstart
-    ) {
-      return true;
-    }
-    return false;
-  }
-
-  #hasInteractiveCursor(element) {
-    const style = element.ownerGlobal?.getComputedStyle(element);
-    if (!style) {
-      return false;
-    }
-    // The keyword is always the last component of the computed value.
-    // Don't split on "," as url() cursor images may contain commas.
-    const cursor = style.cursor.match(/[a-z-]+$/)?.[0];
-    return kInteractiveCursors.has(cursor);
+    return !!role && kInteractiveRoles.has(role.toLowerCase());
   }
 }

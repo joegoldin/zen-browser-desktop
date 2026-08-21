@@ -86,6 +86,8 @@ zen-workspace-default-profile = Default
 
 zen-workspaces-delete-workspace-title = Delete Space?
 zen-workspaces-delete-workspace-body = Are you sure you want to delete { $name }? This action cannot be undone.
+zen-workspaces-remote-delete-title = Delete Synced Space?
+zen-workspaces-remote-delete-body = { $name } was deleted on another device. Delete it here too? Keeping it will restore it on your other devices.
 
 zen-workspaces-managed-readonly-toast = This Space is managed by your configuration.
 
