@@ -1844,7 +1844,7 @@ class nsZenWorkspaces {
       newTab = gBrowser.addTrustedTab("about:blank", {
         userContextId,
         pinned: tab.pinned,
-        index: tab._tPos + 1,
+        index: tab._index + 1,
         skipAnimation: true,
         createLazyBrowser: !wasSelected,
       });
