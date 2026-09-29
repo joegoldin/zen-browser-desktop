@@ -148,11 +148,12 @@ fetched source always matches the base the patches target. The source hash next
 to it is pinned by hand and has to move with it.
 
 `flake.nix` keeps a second, newer nixpkgs for the versions configure insists
-on. The overlay taking `rust-cbindgen` and `nss_latest` from it is vestigial —
-`nixos-26.05` has caught up to 0.29.4 and 3.126, which is what Firefox 154
-wants — but the macOS `apple-sdk_26` it also supplies is not: 26.05 branched
-before nixpkgs bumped that to 26.5 and never took the backport, so it stays at
-26.4 for the life of the release.
+on. The overlay takes `rust-cbindgen` and `nss_latest` from it: configure
+requires a system NSS at least as new as the one Firefox bundles, 3.129 on
+Firefox 157, and `nixos-26.05` is behind that. The macOS `apple-sdk_26` it also
+supplies will not catch up at all: 26.05 branched before nixpkgs bumped that to
+26.5 and never took the backport, so it stays at 26.4 for the life of the
+release.
 
 `devenv.nix` provides the development shell that `mach` and `npm run lint`
 need. Two details in it are load-bearing: jemalloc is filtered off

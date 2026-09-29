@@ -3,15 +3,16 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
-    # Build inputs configure is strict about, where nixos-26.05 has lagged:
-    # cbindgen below 0.29.4, nss below 3.126 on Firefox 154, and — on macOS —
-    # an Apple SDK below 26.5. The pin has since caught up on the first two,
-    # so the overlay below is vestigial, but the SDK is not a matter of
-    # waiting: nixpkgs bumped apple-sdk_26 to 26.5 in a81408d1 (2026-05-17),
-    # after the 26.05 branch-off, and never backported it, so both
+    # Build inputs configure is strict about, where nixos-26.05 lags: cbindgen
+    # below 0.29.4, and nss below the version Firefox bundles (configure wants
+    # system nss >= security/nss/lib/nss/nss.h, 3.129 on Firefox 157), and — on
+    # macOS — an Apple SDK below 26.5. Pinned to a master commit because
+    # nixos-unstable was still at nss 3.128 when Firefox 157 landed. The SDK is
+    # not a matter of waiting: nixpkgs bumped apple-sdk_26 to 26.5 in a81408d1
+    # (2026-05-17), after the 26.05 branch-off, and never backported it, so both
     # nixos-26.05 and nixpkgs-26.05-darwin are stuck at 26.4 for the life of
     # the release.
-    nixpkgs-newer.url = "github:NixOS/nixpkgs/7525d999cd850b9a488817abc89c75dc733acf17";
+    nixpkgs-newer.url = "github:NixOS/nixpkgs/0a59a4df5fb1b3ff45c63d7d9d308686e85cda55";
   };
 
   outputs =

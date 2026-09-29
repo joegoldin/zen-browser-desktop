@@ -42,7 +42,7 @@ let
 
   firefox-src = fetchurl {
     url = "mirror://mozilla/firefox/releases/${firefox-version}/source/firefox-${firefox-version}.source.tar.xz";
-    hash = "sha512-p3zWZJgq3WKGgRZ+9ZOb1r8MiUqjgMymb5tfsmWUeHTR6BnUImTx3QfIQ/im3AINomjMqf8eBk/KAZ3pGvm5lg==";
+    hash = "sha512-0MF4gQKQT+g7++7NvfvUAzdD6bt5H/cGPKSipyFGxyLgyH+3UxsyvpSR9bFSmWA2QZcVDCd0LgrqPO/NE+0N3g==";
   };
 
   # Read from surfer.json so the fetched Firefox source always matches the base
@@ -109,15 +109,15 @@ in
     # init.rs hunk — "Hunk #1 FAILED at 204", fails even at -F3), which git apply
     # and surfer apply cleanly. git apply also requires exact context, so a
     # Firefox-base drift surfaces as a clean failure rather than a silent fuzz.
-    # Skip the two external webrender backports that already landed upstream in
-    # Firefox ${firefox-version} (their code is present in the pristine source, so
-    # re-applying fails as "already applied"). Re-check this skip list whenever the
+    # Skip the external backports that already landed upstream in Firefox
+    # ${firefox-version} (their code is present in the pristine source, so
+    # re-applying fails as "already applied"; surfer gets away with it because it
+    # reverse-applies every patch first). Re-check this skip list whenever the
     # pinned Firefox version changes.
     rsync -r --chmod=u+w --exclude "*.patch" "${zen-src}/src/" .
 
     find "${zen-src}/src" -type f -name "*.patch" \
-      ! -name "bug_2013682_allow_stacking_contexts_to_be_promoted.patch" \
-      ! -name "gh-12979_clip_dirty_rect_to_device_size.patch" \
+      ! -name "issue_14710.patch" \
       | sort | while read -r patch_name; do
       git apply -p1 "$patch_name"
     done
