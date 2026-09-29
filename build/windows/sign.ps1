@@ -3,8 +3,6 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 param(
-    [string][Parameter(Mandatory=$true)]$SignIdentity,
-    [string][Parameter(Mandatory=$true)]$SignIdentityIssuer,
     [string][Parameter(Mandatory=$true)]$GithubRunId
 )
 
@@ -24,11 +22,15 @@ mkdir windsign-temp -ErrorAction SilentlyContinue
 #    echo "Downloaded git objects repo to"
 #} -Verbose -ArgumentList $PWD -Debug
 
+$token = gh auth token
+
 $env:SURFER_MOZCONFIG_ONLY="1"
 $env:SURFER_SIGNING_MODE=""
 
-$env:SURFER_CERT_PATCH_ISSUER=$SignIdentityIssuer
-$env:SURFER_CERT_PATCH_NAME=$SignIdentity
+get-content "$PSScriptRoot/../.env" | foreach {
+    $name, $value = $_.split('=')
+    set-content env:\$name $value
+}
 
 Start-Job -Name "DownloadGitl10n" -ScriptBlock {
     param($PWD)
@@ -46,7 +48,6 @@ npm run build
 
 echo "Downloading artifacts info"
 $artifactsInfo=gh api repos/zen-browser/desktop/actions/runs/$GithubRunId/artifacts
-$token = gh auth token
 
 function New-TemporaryDirectory {
     $tmp = [System.IO.Path]::GetTempPath() # Not $env:TEMP, see https://stackoverflow.com/a/946017
@@ -146,9 +147,9 @@ function SignAndPackage($name) {
     $env:ZEN_SETUP_EXE_PATH="$PWD\windsign-temp\windows-x64-obj-$name\browser\installer\windows\instgen\setup.exe"
 
     if ($name -eq "arm64") {
-        $env:WIN32_REDIST_DIR="$PWD\win-cross\vs2026\VC\Redist\MSVC\14.50.35710\arm64\Microsoft.VC145.CRT"
+        $env:WIN32_REDIST_DIR="$PWD\win-cross\vs2026\VC\Redist\MSVC\14.51.36231\arm64\Microsoft.VC145.CRT"
     } else {
-        $env:WIN32_REDIST_DIR="$PWD\win-cross\vs2026\VC\Redist\MSVC\14.50.35710\x64\Microsoft.VC145.CRT"
+        $env:WIN32_REDIST_DIR="$PWD\win-cross\vs2026\VC\Redist\MSVC\14.51.36231\x64\Microsoft.VC145.CRT"
     }
 
     $env:MAR="..\\build\\windows\\mar.exe"

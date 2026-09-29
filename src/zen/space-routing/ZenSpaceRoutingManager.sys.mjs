@@ -47,7 +47,7 @@ class nsZenSpaceRoutingManager {
     const element = window.MozXULElement.parseXULToFragment(`
         <menuseparator/>
         <menuitem id="context_zen-add-domain-to-routing"
-                  data-lazy-l10n-id="tab-context-zen-add-domain-to-sr"
+                  data-l10n-id="tab-context-zen-add-domain-to-sr"
                   data-l10n-args='{"tabCount": 1}'/>
       `);
     window.document.getElementById("context_undoCloseTab").after(element);
@@ -185,6 +185,14 @@ class nsZenSpaceRoutingManager {
     this.#routeToWorkspace(targetRoute, newTab, options.inBackground, win);
   }
 
+  shouldDeferTabSelection(beforeResult, win) {
+    return (
+      beforeResult.isRouteFound &&
+      beforeResult.targetRoute !== win.gZenWorkspaces.activeWorkspace &&
+      this.#isMostRecentBrowserWindow(win)
+    );
+  }
+
   /**
    * Decides whether an in-place top-level navigation should be pulled out of
    * the current tab and re-opened in a new tab, so that addTab()'s routing can
@@ -287,10 +295,7 @@ class nsZenSpaceRoutingManager {
           if (targetWorkspace) {
             workspaces.moveTabToWorkspace(newTab, targetWorkspace.uuid);
 
-            const mostRecentWindow =
-              Services.wm.getMostRecentWindow("navigator:browser");
-            const isOriginatingWindow = win === mostRecentWindow;
-            if (isOriginatingWindow) {
+            if (this.#isMostRecentBrowserWindow(win)) {
               win.gZenWorkspaces.lastSelectedWorkspaceTabs[
                 targetWorkspace.uuid
               ] = newTab;
@@ -305,6 +310,10 @@ class nsZenSpaceRoutingManager {
     } catch (err) {
       console.error("[ZenSpaceRouting]: Error moving tab to workspace:", err);
     }
+  }
+
+  #isMostRecentBrowserWindow(win) {
+    return win === Services.wm.getMostRecentWindow("navigator:browser");
   }
 
   /**

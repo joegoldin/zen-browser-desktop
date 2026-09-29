@@ -17,6 +17,11 @@ ChromeUtils.defineLazyGetter(lazy, "l10n", () => {
   return new Localization(["browser/zen-command-palette.ftl"], true);
 });
 
+ChromeUtils.defineESModuleGetters(lazy, {
+  SessionStore:
+    "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs",
+});
+
 function isNotEmptyTab(window) {
   return !window.gBrowser.selectedTab.hasAttribute("zen-empty-tab");
 }
@@ -30,12 +35,25 @@ const globalActionsTemplate = [
   {
     l10nId: "zen-action-open-theme-picker",
     command: "cmd_zenOpenZenThemePicker",
-    icon: "chrome://browser/skin/zen-icons/edit-theme.svg",
+    icon: "chrome://browser/skin/zen-icons/paintbrush-fill.svg",
   },
   {
     l10nId: "zen-action-new-split-view",
     command: "cmd_zenNewEmptySplit",
     icon: "chrome://browser/skin/zen-icons/split.svg",
+  },
+  {
+    l10nId: "zen-action-unsplit-view",
+    command: "cmd_zenSplitViewUnsplit",
+    icon: "chrome://browser/skin/zen-icons/split.svg",
+    isAvailable: window => {
+      return window.gZenViewSplitter.splitViewActive;
+    },
+  },
+  {
+    l10nId: "zen-action-new-space",
+    command: "cmd_zenOpenWorkspaceCreation",
+    icon: "chrome://browser/skin/zen-icons/plus.svg",
   },
   {
     l10nId: "zen-action-new-folder",
@@ -159,6 +177,31 @@ const globalActionsTemplate = [
     },
   },
   {
+    l10nId: "zen-action-reopen-closed-tab",
+    command: "History:RestoreLastClosedTabOrWindowOrSession",
+    icon: "chrome://browser/skin/zen-icons/history.svg",
+    isAvailable: window => {
+      return lazy.SessionStore.getClosedTabCount(window) > 0;
+    },
+  },
+  {
+    l10nId: "zen-action-duplicate-tab",
+    command: "cmd_zenDuplicateTab",
+    icon: "chrome://browser/skin/zen-icons/duplicate-tab.svg",
+    isAvailable: window => {
+      return isNotEmptyTab(window);
+    },
+  },
+  {
+    l10nId: "zen-action-reset-pinned-tab",
+    command: "cmd_zenPinnedTabReset",
+    icon: "chrome://browser/skin/zen-icons/arrow-rotate-anticlockwise.svg",
+    isAvailable: window => {
+      const tab = window.gBrowser.selectedTab;
+      return tab.pinned && tab.hasAttribute("zen-pinned-changed");
+    },
+  },
+  {
     l10nId: "zen-action-reload-tab",
     command: "Browser:Reload",
     icon: "chrome://browser/skin/zen-icons/reload.svg",
@@ -259,6 +302,10 @@ const globalActionsTemplate = [
   },
 ];
 
+export function formatValueSync(l10nId) {
+  return lazy.l10n.formatValueSync(l10nId);
+}
+
 export const globalActions = globalActionsTemplate.map(action => ({
   isAvailable: window => {
     return (
@@ -274,6 +321,6 @@ export const globalActions = globalActionsTemplate.map(action => ({
   extraPayload: {},
   ...action,
   get label() {
-    return lazy.l10n.formatValueSync(action.l10nId);
+    return formatValueSync(action.l10nId);
   },
 }));

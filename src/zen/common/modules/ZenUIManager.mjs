@@ -46,15 +46,6 @@ window.gZenUIManager = {
       return document.getElementById("zen-toast-container");
     });
 
-    new ResizeObserver(
-      gZenCommonActions.throttle(
-        gZenCompactModeManager.getAndApplySidebarWidth.bind(
-          gZenCompactModeManager
-        ),
-        Services.prefs.getIntPref("zen.view.sidebar-height-throttle", 500)
-      )
-    ).observe(gNavToolbox);
-
     gZenWorkspaces.promiseInitialized.finally(() => {
       this._hasLoadedDOM = true;
       this.updateTabsToolbar();
@@ -144,6 +135,20 @@ window.gZenUIManager = {
       const animation = element.animate(keyframes, ...args);
       animation.onfinish = () => resolve();
     });
+  },
+
+  /**
+   * Shakes an element from side to side to catch the user's eye.
+   *
+   * @param {Element} element
+   * @param {number} delay Milliseconds to wait before shaking.
+   */
+  shakeElement(element, delay = 0) {
+    return this.elementAnimate(
+      element,
+      { x: [0, -12, 8, -4, 2, 0] },
+      { duration: 600, delay, easing: "ease-out" }
+    );
   },
 
   _addNewCustomizableButtonsIfNeeded() {
@@ -257,7 +262,7 @@ window.gZenUIManager = {
     };
   },
 
-  updateTabsToolbar() {
+  updateTabsToolbar(fromResizeEvent = false) {
     const kUrlbarHeight = 333;
     gURLBar.style.setProperty(
       "--zen-urlbar-top",
@@ -270,8 +275,8 @@ window.gZenUIManager = {
     gZenVerticalTabsManager.actualWindowButtons.removeAttribute(
       "zen-has-hover"
     );
-    gZenVerticalTabsManager.recalculateURLBarHeight(true);
-    if (!this._preventToolbarRebuild) {
+    gZenVerticalTabsManager.recalculateURLBarHeight(!fromResizeEvent);
+    if (!this._preventToolbarRebuild && !fromResizeEvent) {
       setTimeout(() => {
         gZenWorkspaces.updateTabsContainers();
       }, 0);
@@ -493,39 +498,31 @@ window.gZenUIManager = {
   _clearTimeout: null,
   _lastTab: null,
 
-  // Check if browser elements are in a valid state for tab operations
-  _validateBrowserState() {
-    // Check if browser window is still open
-    if (window.closed) {
-      return false;
-    }
+  _urlbarSessionCounter: 0,
+  _urlbarOwner: null,
 
-    // Check if gBrowser is available
-    if (!gBrowser || !gBrowser.tabContainer) {
-      return false;
-    }
-
-    // Check if URL bar is available
-    if (!gURLBar) {
-      return false;
-    }
-
-    return true;
+  _isOwner(closeSeq) {
+    return this._urlbarOwner === closeSeq;
   },
 
   handleNewTab(
     werePassedURL,
     searchClipboard,
     where,
-    overridePreferance = false
+    overridePreferance = false,
+    closeToken = {}
   ) {
-    // Validate browser state first
-    if (!this._validateBrowserState()) {
-      console.warn("Browser state invalid for new tab operation");
+    // Keep this here. It's better to make sure every
+    // call has a different token rather then forgetting
+    // to increment it in one of the early returns.
+    const closeSeq = ++this._urlbarSessionCounter;
+    closeToken.id = closeSeq;
+
+    if (this.testingEnabled && !overridePreferance) {
       return false;
     }
 
-    if (this.testingEnabled && !overridePreferance) {
+    if (document.documentElement.hasAttribute("zen-welcome-stage")) {
       return false;
     }
 
@@ -542,7 +539,13 @@ window.gZenUIManager = {
 
     // Close the new tab popup on cmd/ctrl + t
     if (!overridePreferance && gURLBar.hasAttribute("zen-newtab")) {
-      this.handleUrlbarClose();
+      // The _zenHandleUrlbarClose holds a token in it's closure.
+      // Call that instead.
+      if (gURLBar._zenHandleUrlbarClose) {
+        gURLBar._zenHandleUrlbarClose();
+      } else {
+        this.handleUrlbarClose(closeSeq);
+      }
       return true;
     }
 
@@ -568,7 +571,9 @@ window.gZenUIManager = {
     this._prevUrlbarLabel = gURLBar._untrimmedValue || "";
 
     // Set up URL bar for new tab
-    gURLBar._zenHandleUrlbarClose = this.handleUrlbarClose.bind(this);
+    gURLBar._zenHandleUrlbarClose = (onSwitch, onElementPicked) =>
+      this.handleUrlbarClose(closeSeq, onSwitch, onElementPicked);
+    this._urlbarOwner = closeSeq;
     gURLBar.setAttribute("zen-newtab", true);
 
     // Update newtab buttons
@@ -582,10 +587,25 @@ window.gZenUIManager = {
       document.getElementById("Browser:OpenLocation").doCommand();
     } catch (e) {
       console.error("Error opening location in new tab:", e);
-      this.handleUrlbarClose(false);
+      this.handleUrlbarClose(closeSeq, false, false);
       return false;
     }
     return true;
+  },
+
+  /**
+   * Check whether the closeToken given by handleNewTab
+   * corresponds to a close event.
+   *
+   * @param {object} closeToken - Token previously passed to handleNewTab.
+   * @param {CustomEvent} event - A ZenURLBarClosed event.
+   * @returns {boolean}
+   */
+  matchesCloseToken(closeToken, event) {
+    return (
+      typeof closeToken?.id === "number" &&
+      event?.detail?.closeSeq === closeToken.id
+    );
   },
 
   clearUrlbarData() {
@@ -593,13 +613,7 @@ window.gZenUIManager = {
     this._lastSearch = "";
   },
 
-  handleUrlbarClose(onSwitch = false, onElementPicked = false) {
-    // Validate browser state first
-    if (!this._validateBrowserState()) {
-      console.warn("Browser state invalid for URL bar close operation");
-      return;
-    }
-
+  handleUrlbarClose(closeSeq, onSwitch = false, onElementPicked = false) {
     // Reset URL bar state
     if (gURLBar._zenHandleUrlbarClose) {
       gURLBar._zenHandleUrlbarClose = null;
@@ -607,59 +621,69 @@ window.gZenUIManager = {
 
     const isFocusedBefore = gURLBar.focused;
     setTimeout(() => {
-      // We use this attribute on Tabbrowser::addTab
-      gURLBar.removeAttribute("zen-newtab");
+      /* If someone else opened the url bar in the meantime don't be
+       * stingy and leave it open for them.*/
+      if (this._isOwner(closeSeq)) {
+        // We use this attribute on Tabbrowser::addTab
+        gURLBar.removeAttribute("zen-newtab");
 
-      // Safely restore tab visual state with proper validation
-      if (
-        this._lastTab &&
-        !this._lastTab.closing &&
-        this._lastTab.documentGlobal &&
-        !this._lastTab.documentGlobal.closed &&
-        gBrowser.selectedTab === this._lastTab
-      ) {
-        this._lastTab._visuallySelected = true;
-        this._lastTab = null;
-      }
-
-      // Reset newtab buttons
-      for (const button of this.newtabButtons) {
-        button.removeAttribute("in-urlbar");
-      }
-
-      // Handle search data
-      if (onSwitch) {
-        this.clearUrlbarData();
-      } else {
-        this._lastSearch = gURLBar._untrimmedValue || "";
-
-        if (this._clearTimeout) {
-          clearTimeout(this._clearTimeout);
+        // Safely restore tab visual state with proper validation
+        if (
+          this._lastTab &&
+          !this._lastTab.closing &&
+          this._lastTab.documentGlobal &&
+          !this._lastTab.documentGlobal.closed &&
+          gBrowser.selectedTab === this._lastTab
+        ) {
+          this._lastTab._visuallySelected = true;
+          this._lastTab = null;
         }
 
-        this._clearTimeout = setTimeout(() => {
+        // Reset newtab buttons
+        for (const button of this.newtabButtons) {
+          button.removeAttribute("in-urlbar");
+        }
+
+        // Handle search data
+        if (onSwitch) {
           this.clearUrlbarData();
-        }, this.urlbarWaitToClear);
-      }
+        } else {
+          this._lastSearch = gURLBar._untrimmedValue || "";
 
-      // Safely restore URL bar state with proper validation
-      if (this._prevUrlbarLabel) {
-        gURLBar.setURI({
-          uri: this._prevUrlbarLabel,
-          dueToTabSwitch: onSwitch,
-          isSameDocument: !onSwitch,
-        });
-      }
+          if (this._clearTimeout) {
+            clearTimeout(this._clearTimeout);
+          }
 
-      gURLBar.handleRevert();
+          this._clearTimeout = setTimeout(() => {
+            this.clearUrlbarData();
+          }, this.urlbarWaitToClear);
+        }
+
+        // Safely restore URL bar state with proper validation
+        if (this._prevUrlbarLabel) {
+          gURLBar.setURI({
+            uri: this._prevUrlbarLabel,
+            dueToTabSwitch: onSwitch,
+            isSameDocument: !onSwitch,
+          });
+        }
+
+        gURLBar.handleRevert();
+      }
 
       if (isFocusedBefore) {
         setTimeout(() => {
           window.dispatchEvent(
             new CustomEvent("ZenURLBarClosed", {
-              detail: { onSwitch, onElementPicked },
+              detail: { onSwitch, onElementPicked, closeSeq },
             })
           );
+
+          if (!this._isOwner(closeSeq)) {
+            return;
+          }
+          this._urlbarOwner = null;
+
           gURLBar.view.close({ elementPicked: onElementPicked });
           gURLBar.updateTextOverflow();
 
@@ -683,6 +707,8 @@ window.gZenUIManager = {
             }
           }
         }, 0);
+      } else if (this._isOwner(closeSeq)) {
+        this._urlbarOwner = null;
       }
     }, 0);
   },
@@ -815,7 +841,6 @@ window.gZenUIManager = {
   },
 
   panelUIPosition(panel, anchor) {
-    void panel;
     // The alignment position of the panel is determined during the "popuppositioned" event
     // when the panel opens. The alignment positions help us determine in which orientation
     // the panel is anchored to the screen space.
@@ -938,22 +963,9 @@ window.gZenVerticalTabsManager = {
     });
 
     ChromeUtils.defineLazyGetter(this, "hidesTabsToolbar", () => {
-      return (
-        document.documentElement
-          .getAttribute("chromehidden")
-          ?.includes("toolbar") ||
-        document.documentElement
-          .getAttribute("chromehidden")
-          ?.includes("menubar")
-      );
+      return document.documentElement.hasAttribute("popup-window");
     });
 
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "_canReplaceNewTab",
-      "zen.urlbar.replace-newtab",
-      true
-    );
     var updateEvent = this._updateEvent.bind(this);
     var onPrefChange = this._onPrefChange.bind(this);
 
@@ -1022,6 +1034,40 @@ window.gZenVerticalTabsManager = {
     return this.__topButtonsSeparatorElement;
   },
 
+  /**
+   * The strip items that sit below aItem and therefore have to move when its
+   * space appears or collapses.
+   *
+   * @param {Element} aItem
+   * @returns {Element[]} The elements carrying those items' space.
+   */
+  _itemsBelowInStrip(aItem) {
+    const items = gBrowser.tabContainer.ariaFocusableItems;
+    const index = items.findIndex(
+      item =>
+        !aItem.contains(item) &&
+        !!(
+          aItem.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING
+        )
+    );
+    if (index < 0) {
+      return [];
+    }
+    const elements = [];
+    for (const item of items.slice(index)) {
+      let element;
+      try {
+        element = ZenDragAndDrop.elementToMove(item);
+      } catch {
+        continue;
+      }
+      if (element && !elements.includes(element)) {
+        elements.push(element);
+      }
+    }
+    return elements;
+  },
+
   animateItemOpen(aItem) {
     if (
       gReduceMotion ||
@@ -1033,27 +1079,38 @@ window.gZenVerticalTabsManager = {
       // so we can capture and improve them.
       (gZenUIManager.testingEnabled && !gZenUIManager.profilingEnabled) ||
       !gZenStartup.isReady ||
-      aItem.group?.hasAttribute("split-view-group")
+      aItem.group?.hasAttribute("split-view-group") ||
+      aItem.hasAttribute("zen-glance-tab")
     ) {
       return;
     }
-    // get next visible tab
-    const isLastItem = () => {
-      const visibleItems = gBrowser.tabContainer.ariaFocusableItems;
-      return visibleItems[visibleItems.length - 1] === aItem;
-    };
-
     try {
       const itemSize =
         window.windowUtils.getBoundsWithoutFlushing(aItem).height;
-      const transform = `-${itemSize}px`;
+      const itemsBelow = this._itemsBelowInStrip(aItem);
+      for (const item of itemsBelow) {
+        item.style.transform = `translateY(-${itemSize}px)`;
+      }
+      for (const item of itemsBelow) {
+        gZenUIManager
+          .elementAnimate(
+            item,
+            { y: [-itemSize, 0] },
+            { duration: 120, easing: "ease-out" }
+          )
+          .catch(err => {
+            console.error(err);
+          })
+          .finally(() => {
+            item.style.removeProperty("transform");
+          });
+      }
       gZenUIManager.motion
         .animate(
           aItem,
           {
             opacity: [0, 1],
             transform: ["scale(0.95)", "scale(1)"],
-            marginBottom: isLastItem() ? ["0px", "0px"] : [transform, "0px"],
           },
           {
             duration: 0.12,
@@ -1065,7 +1122,6 @@ window.gZenVerticalTabsManager = {
           console.error(err);
         })
         .finally(() => {
-          aItem.style.removeProperty("margin-bottom");
           aItem.style.removeProperty("transform");
           aItem.style.removeProperty("opacity");
         });
@@ -1226,8 +1282,16 @@ window.gZenVerticalTabsManager = {
     if (gZenWorkspaces._processingResize) {
       return;
     }
+    this._pendingUrlbarFormatUpdate ||= updateFormat;
+    if (this._urlbarHeightRecalcScheduled) {
+      return;
+    }
+    this._urlbarHeightRecalcScheduled = true;
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
+        delete this._urlbarHeightRecalcScheduled;
+        const shouldUpdateFormat = this._pendingUrlbarFormatUpdate;
+        delete this._pendingUrlbarFormatUpdate;
         gURLBar.removeAttribute("--urlbar-height");
         let height;
         if (!this._hasSetSingleToolbar) {
@@ -1238,11 +1302,24 @@ window.gZenVerticalTabsManager = {
         if (typeof height !== "undefined") {
           gURLBar.style.setProperty("--urlbar-height", `${height}px`);
         }
-        if (updateFormat) {
+        if (shouldUpdateFormat) {
           gURLBar.zenFormatURLValue();
         }
       });
     });
+  },
+
+  getSidebarMinWidth() {
+    let captionButtons = this.actualWindowButtons;
+    let captionButtonsWidth = this._prefsRightSide
+      ? window.windowUtils.getBoundsWithoutFlushing(captionButtons).width
+      : 0;
+    switch (AppConstants.platform) {
+      case "macosx":
+        return 163;
+      default:
+        return 160 + captionButtonsWidth;
+    }
   },
 
   // eslint-disable-next-line complexity
@@ -1299,18 +1376,21 @@ window.gZenVerticalTabsManager = {
         document.documentElement.removeAttribute("zen-right-side");
       }
 
-      delete this._hadSidebarCollapse;
-      if (isSidebarExpanded) {
-        this._hadSidebarCollapse = !document.documentElement.hasAttribute(
-          "zen-sidebar-expanded"
-        );
-        this.navigatorToolbox.setAttribute("zen-sidebar-expanded", "true");
-        document.documentElement.setAttribute("zen-sidebar-expanded", "true");
-        gBrowser.tabContainer.setAttribute("expanded", "true");
-      } else {
-        this.navigatorToolbox.removeAttribute("zen-sidebar-expanded");
-        document.documentElement.removeAttribute("zen-sidebar-expanded");
-        gBrowser.tabContainer.removeAttribute("expanded");
+      const wasSidebarExpanded = document.documentElement.hasAttribute(
+        "zen-sidebar-expanded"
+      );
+      if (isSidebarExpanded !== wasSidebarExpanded) {
+        delete this._hadSidebarCollapse;
+        if (isSidebarExpanded) {
+          this._hadSidebarCollapse = true;
+          this.navigatorToolbox.setAttribute("zen-sidebar-expanded", "true");
+          document.documentElement.setAttribute("zen-sidebar-expanded", "true");
+          gBrowser.tabContainer.setAttribute("expanded", "true");
+        } else {
+          this.navigatorToolbox.removeAttribute("zen-sidebar-expanded");
+          document.documentElement.removeAttribute("zen-sidebar-expanded");
+          gBrowser.tabContainer.removeAttribute("expanded");
+        }
       }
 
       const appContentNavbarContaienr = document.getElementById(
@@ -1348,17 +1428,36 @@ window.gZenVerticalTabsManager = {
 
       if (isSingleToolbar) {
         this._navbarParent = navBar.parentElement;
-        let elements = document.querySelectorAll(
-          '#nav-bar-customization-target > :is([cui-areatype="toolbar"], .chromeclass-toolbar-additional):not(#urlbar-container):not(toolbarspring)'
+        let elements = Array.from(
+          document.querySelectorAll(
+            '#nav-bar-customization-target > :is([cui-areatype="toolbar"], .chromeclass-toolbar-additional):not(#urlbar-container):not(toolbarspring)'
+          )
         );
-        elements = Array.from(elements).reverse();
+        let normalButtons = [];
+        let extensionButtons = [];
+        for (const element of elements) {
+          if (
+            element.hasAttribute("data-extensionid") &&
+            Services.prefs.getBoolPref("zen.view.overflow-webext-toolbar", true)
+          ) {
+            extensionButtons.push(element);
+          } else {
+            normalButtons.push(element);
+          }
+        }
         // Add separator if it doesn't exist
         if (!this._hasSetSingleToolbar) {
           buttonsTarget.append(this._topButtonsSeparatorElement);
         }
         this._hasSetSingleToolbar = true;
-        for (const button of elements) {
+        for (const button of normalButtons.reverse()) {
           this.appendCustomizableItem(this._topButtonsSeparatorElement, button);
+        }
+        for (const extension of extensionButtons) {
+          this.appendCustomizableItem(
+            this._topButtonsSeparatorElement,
+            extension
+          );
         }
         buttonsTarget.prepend(
           document.getElementById("unified-extensions-button")
@@ -1501,15 +1600,7 @@ window.gZenVerticalTabsManager = {
       }
 
       gZenCompactModeManager.updateCompactModeContext(isSingleToolbar);
-
-      // Always move the splitter next to the sidebar
-      const splitter = document.getElementById("zen-sidebar-splitter");
-      splitter.addEventListener("dragover", gBrowser.tabContainer);
-      this.navigatorToolbox.after(splitter);
       window.dispatchEvent(new Event("resize"));
-      if (!isCompactMode) {
-        gZenCompactModeManager.getAndApplySidebarWidth({});
-      }
       gZenUIManager.updateTabsToolbar();
       this.rebuildURLBarMenus();
       appContentNavbarWrapper.style.transition = "";
@@ -1520,13 +1611,7 @@ window.gZenVerticalTabsManager = {
   },
 
   rebuildURLBarMenus() {
-    if (document.getElementById("paste-and-go")) {
-      return;
-    }
-    gURLBar._initCopyCutController();
-    gURLBar._initPasteAndGo();
-    gURLBar._initStripOnShare();
-    gURLBar._updatePlaceholderFromDefaultEngine();
+    gURLBar.updatePlaceholder();
   },
 
   rebuildAreas() {
@@ -1540,6 +1625,10 @@ window.gZenVerticalTabsManager = {
       "zen.view.sidebar-expanded.max-width"
     );
     const toolbox = gNavToolbox;
+    toolbox.style.setProperty(
+      "--zen-toolbox-min-width",
+      `${this.getSidebarMinWidth()}px`
+    );
     if (!this._prefsCompactMode) {
       toolbox.style.maxWidth = `${maxWidth}px`;
     } else {
@@ -1740,3 +1829,10 @@ window.gZenVerticalTabsManager = {
     this._tabEdited = null;
   },
 };
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  gZenVerticalTabsManager,
+  "_canReplaceNewTab",
+  "zen.urlbar.replace-newtab",
+  true
+);

@@ -42,6 +42,8 @@ export default [
 
   "gZenViewSplitter",
 
+  "gZenShareManager",
+
   "gZenSpaceRoutingManager",
 
   "Ci",
@@ -76,6 +78,7 @@ export default [
   "isInitialPage",
   "browserWindows",
   "MozTabbrowserTabGroup",
+  "ZenDragAndDrop",
   "updateBookmarkToolbarVisibility",
   "gNavigatorBundle",
   "updateFxaToolbarMenu",

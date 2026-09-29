@@ -69,6 +69,7 @@ zen-tabs-renamed = Tab has been successfully renamed!
 zen-background-tab-opened-toast = New background tab opened!
 zen-workspace-renamed-toast = Workspace has been successfully renamed!
 zen-split-view-limit-toast = Can't add more panels to the split view!
+zen-sidebar-drag-collapsed-toast = Sidebar hidden! Use <span>{ $shortcut }</span> to bring the sidebar back.
 
 zen-toggle-compact-mode-button =
     .label = Compact Mode
@@ -164,5 +165,5 @@ zen-window-sync-migration-dialog-learn-more = Learn More
 zen-window-sync-migration-dialog-accept = Got It
 
 zen-appmenu-new-blank-window =
-    .label = New blank window
+    .label = New Blank Window
 
