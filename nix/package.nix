@@ -68,9 +68,12 @@ in
 # to thin cross-LTO: per-module, parallel, bounded link memory, for ~90-95% of
 # the runtime perf. PGO (the second compile pass + profile run) stays on.
 base.overrideAttrs (old: {
-  configureFlags = map (
-    f: if f == "--enable-lto=cross,full" then "--enable-lto=cross,thin" else f
-  ) old.configureFlags;
+  # Firefox 157 dropped the ffmpeg option (toolkit/moz.configure now enables
+  # it for every non-Android, non-Windows target), but buildMozillaMach still
+  # passes it, and configure rejects unknown options.
+  configureFlags = map (f: if f == "--enable-lto=cross,full" then "--enable-lto=cross,thin" else f) (
+    lib.remove "--enable-ffmpeg" old.configureFlags
+  );
 
   # zen-browser-flake's home-manager module installs the Sine bootloader by
   # globbing $out/lib/zen-bin-*, which is how its own repacked release tarball
