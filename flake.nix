@@ -13,10 +13,20 @@
     # nixos-26.05 and nixpkgs-26.05-darwin are stuck at 26.4 for the life of
     # the release.
     nixpkgs-newer.url = "github:NixOS/nixpkgs/0a59a4df5fb1b3ff45c63d7d9d308686e85cda55";
+    # Dynamic derivations, for the per-directory build in nix/dynamic.
+    drowse = {
+      url = "github:figsoda/drowse";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
-    { self, nixpkgs, nixpkgs-newer }:
+    {
+      self,
+      nixpkgs,
+      nixpkgs-newer,
+      drowse,
+    }:
     let
       systems = [
         "x86_64-linux"
@@ -26,62 +36,36 @@
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
 
-      # An overlay rather than extraNativeBuildInputs entries: buildMozillaMach
-      # (and mach's own configure, which the lint app also runs) reach for
-      # rust-cbindgen and nss_latest themselves, so they have to be replaced at
-      # the pkgs level for configure to see the newer ones.
-      pkgsFor =
+      zenFor =
         system:
-        import nixpkgs {
-          inherit system;
-          overlays = [
-            (_final: _prev: {
-              inherit (nixpkgs-newer.legacyPackages.${system})
-                rust-cbindgen
-                nss_latest
-                ;
-            })
-          ];
+        import ./nix {
+          inherit nixpkgs nixpkgs-newer system;
+          src = self;
         };
+      pkgsFor = system: (zenFor system).pkgs;
     in
     {
       packages = forAllSystems (
         system:
         let
           pkgs = pkgsFor system;
-          # `self` is the fork tree itself — the thing the build patches into the
-          # Firefox source — so building this flake builds whatever commit is
-          # referenced (locally: the checkout; from dotfiles: the pinned rev).
-          zen-browser-unwrapped = pkgs.callPackage ./nix/package.nix {
-            zen-src-tree = self;
-            # The 26.5 SDK macOS needs, built by the *pinned* nixpkgs rather
-            # than taken from nixpkgs-newer wholesale: apple-sdk's package.nix
-            # and setup-hooks/ are byte-identical between the two pins, so
-            # calling the newer file (which carries the newer
-            # metadata/versions.json) against our own package set yields 26.5
-            # without dragging a second nixpkgs' stdenv, libiconv and
-            # compiler-rt into the closure.
-            #
-            # Deliberately passed here rather than added to the overlay above.
-            # Much of the Darwin package set depends on apple-sdk_26 even
-            # though the stdenv's own default SDK is 14.4, so overlaying it
-            # rebuilds ~450 packages — cups, gnutls, unbound, sphinx and the
-            # rest of Firefox's Darwin buildInputs — from source with no cache
-            # hits. Scoped to this derivation (nix/package.nix forwards it into
-            # buildMozillaMach's `.override`), only Zen itself rebuilds, and
-            # its dependencies keep their cached 26.4-built outputs. That mix
-            # is fine: the SDK version governs the headers and stubs each
-            # package is compiled against, not a shared ABI.
-            #
-            # Never forced on Linux, where buildMozillaMach only reaches for
-            # the SDK inside its own `isDarwin` branch.
-            apple-sdk_26 = pkgs.callPackage "${nixpkgs-newer}/pkgs/by-name/ap/apple-sdk/package.nix" {
-              darwinSdkMajorVersion = "26";
-            };
-          };
+          zen-browser-unwrapped-monolithic = (zenFor system).zen-browser-unwrapped;
+          # Per-directory derivations on Linux, so a failed build keeps what
+          # finished (see nix/dynamic). Darwin keeps the single derivation: its
+          # app-bundle install has never been run through the dynamic stages.
+          zen-browser-unwrapped =
+            if pkgs.stdenv.hostPlatform.isLinux then
+              pkgs.callPackage ./nix/dynamic {
+                drowse = drowse.lib.${system};
+                inherit nixpkgs nixpkgs-newer system;
+                src = self;
+                zen = zen-browser-unwrapped-monolithic;
+              }
+            else
+              zen-browser-unwrapped-monolithic;
         in
         {
-          inherit zen-browser-unwrapped;
+          inherit zen-browser-unwrapped zen-browser-unwrapped-monolithic;
           default = zen-browser-unwrapped;
         }
       );

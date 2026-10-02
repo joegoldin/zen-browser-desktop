@@ -1,5 +1,70 @@
 {
   "nodes": {
+    "drowse": {
+      "inputs": {
+        "flake-parts": "flake-parts",
+        "haumea": "haumea",
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1790642937,
+        "narHash": "sha256-fM37dUKuvzvbErCxZdfX29Lpg+c6BT3FCM6gZ+NenEE=",
+        "owner": "figsoda",
+        "repo": "drowse",
+        "rev": "3ec05474eb82f7d6b482b66298759b41d9603d35",
+        "type": "github"
+      },
+      "original": {
+        "owner": "figsoda",
+        "repo": "drowse",
+        "type": "github"
+      }
+    },
+    "flake-parts": {
+      "inputs": {
+        "nixpkgs-lib": [
+          "drowse",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1788450739,
+        "narHash": "sha256-glZLQlzIn1fXH6PazR2iUmTo7kzzyYSshrWhLS9TqCU=",
+        "owner": "hercules-ci",
+        "repo": "flake-parts",
+        "rev": "31729ca8cbdb4fa927b34e5f4353e6a83f39e993",
+        "type": "github"
+      },
+      "original": {
+        "owner": "hercules-ci",
+        "repo": "flake-parts",
+        "type": "github"
+      }
+    },
+    "haumea": {
+      "inputs": {
+        "nixpkgs": [
+          "drowse",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1685133229,
+        "narHash": "sha256-FePm/Gi9PBSNwiDFq3N+DWdfxFq0UKsVVTJS3cQPn94=",
+        "owner": "nix-community",
+        "repo": "haumea",
+        "rev": "34dd58385092a23018748b50f9b23de6266dffc2",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "ref": "v0.2.2",
+        "repo": "haumea",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1780453794,
@@ -34,6 +99,7 @@
     },
     "root": {
       "inputs": {
+        "drowse": "drowse",
         "nixpkgs": "nixpkgs",
         "nixpkgs-newer": "nixpkgs-newer"
       }
