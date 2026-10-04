@@ -111,7 +111,10 @@ tab-group[split-view-group][zen-tree-nest-target] {
 }
 
 /* A dragged tree branch is auto-multiselected so it moves as one block, but it
-   shouldn't render as a manual multiselect highlight on the in-place tabs. */
+   shouldn't render as a manual multiselect highlight on the in-place tabs.
+   :has() only matches while a branch drag is in progress, and then only
+   inside a split-view group's handful of tabs. */
+/* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector */
 #tabbrowser-tabs[zen-branch-dragging]
   .tabbrowser-tab[multiselected]:not([visuallyselected]),
 #tabbrowser-tabs[zen-branch-dragging]
