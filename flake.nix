@@ -171,6 +171,11 @@
                 # pkg-config; a bare script gets none of the search-path wiring
                 # a nix shell would provide, so it is spelled out.
                 export PKG_CONFIG_PATH="${pkgConfigPath}"
+                # mozlint's cargo-audit setup `cargo install`s its pinned
+                # version (newer than nixpkgs' is not accepted) and then
+                # looks the binary up on PATH, which here holds only the
+                # runtime inputs, so the install would never be found.
+                export PATH="$HOME/.cargo/bin:$PATH"
 
                 # configure locates libclang only through --with-libclang-path
                 # or the clang binary's own -print-search-dirs, never an
